@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SRA3 Imposition Pro</title>
+
+    <script src="https://unpkg.com/pdf-lib/dist/pdf-lib.min.js"></script>
+
+    <style>
+      body {
+        font-family: sans-serif;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+        margin: 0;
+        background-color: #f0f2f5;
+      }
+
+      h1 {
+        color: #333;
+        margin-bottom: 30px;
+      }
+
+      .container {
+        display: flex;
+        gap: 30px;
+      }
+
+      .drop-zone {
+        width: 300px;
+        height: 250px;
+        border: 3px dashed #aaa;
+        border-radius: 12px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        text-align: center;
+        color: #666;
+        font-size: 1.1rem;
+        background-color: #fff;
+        transition: all 0.3s ease;
+        padding: 20px;
+        box-sizing: border-box;
+      }
+
+      .drop-zone span {
+        font-size: 0.9rem;
+        color: #999;
+        margin-top: 10px;
+      }
+
+      .drop-zone.hover {
+        border-color: #4caf50;
+        background-color: #e8f5e9;
+        color: #333;
+      }
+
+      .drop-zone.error {
+        border-color: #f44336;
+        background-color: #ffebee;
+        color: #d32f2f;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>SRA3 Multi-Page Imposition</h1>
+
+    <div class="container">
+      <div id="zone-no-bleed" class="drop-zone">
+        <strong>Drop EXACT Size PDF</strong>
+        <span>90x50mm (Landscape)</span>
+      </div>
+
+      <div id="zone-bleed" class="drop-zone">
+        <strong>Drop BLEED Size PDF</strong>
+        <span>94x54mm (Landscape)</span>
+      </div>
+    </div>
+
+    <script>
+      ["dragenter", "dragover", "dragleave", "drop"].forEach((eventName) => {
+        document.body.addEventListener(
+          eventName,
+          (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+          },
+          false,
+        );
+      });
+
+      function setupDropZone(zoneId, hasBleed) {
+        const dropZone = document.getElementById(zoneId);
+        ["dragenter", "dragover"].forEach((eventName) =>
+          dropZone.addEventListener(
+            eventName,
+            () => dropZone.classList.add("hover"),
+            false,
+          ),
+        );
+        ["dragleave", "drop"].forEach((eventName) =>
+          dropZone.addEventListener(
+            eventName,
+            () => dropZone.classList.remove("hover"),
+            false,
+          ),
+        );
+
+        dropZone.addEventListener(
+          "drop",
+          (e) => {
+            const files = e.dataTransfer.files;
+            if (files.length > 0 && files[0].type === "application/pdf") {
+              processAndExportPDF(files[0], hasBleed, dropZone);
+            } else {
+              alert("Please drop a valid PDF file.");
+            }
+          },
+          false,
+        );
+      }
+
+      setupDropZone("zone-no-bleed", false);
+      setupDropZone("zone-bleed", true);
+
+      function mmToPt(mm) {
+        return (mm * 72) / 25.4;
+      }
+      function ptToMm(pt) {
+        return (pt * 25.4) / 72;
+      }
+
+      async function processAndExportPDF(file, hasBleed, dropZoneElement) {
+        const originalText = dropZoneElement.innerHTML;
+        dropZoneElement.innerHTML = "<strong>Reading File...</strong>";
+        dropZoneElement.classList.remove("error");
+
+        try {
+          const arrayBuffer = await file.arrayBuffer();
+          const originalPdf = await PDFLib.PDFDocument.load(arrayBuffer);
+
+          // --- VALIDATION CHECK ---
+          const firstPage = originalPdf.getPages()[0];
+          const { width, height } = firstPage.getSize();
+
+          const actualWidthMm = ptToMm(width);
+          const actualHeightMm = ptToMm(height);
+
+          const expectedW = hasBleed ? 94 : 90;
+          const expectedH = hasBleed ? 54 : 50;
+
+          // We allow a 1.5mm tolerance for bounding box rounding errors
+          const tolerance = 1.5;
+          const isMatch =
+            Math.abs(actualWidthMm - expectedW) <= tolerance &&
+            Math.abs(actualHeightMm - expectedH) <= tolerance;
+
+          if (!isMatch) {
+            dropZoneElement.classList.add("error");
+            dropZoneElement.innerHTML = `<strong>Wrong Size!</strong><span>Got ~${Math.round(actualWidthMm)}x${Math.round(actualHeightMm)}mm.</span>`;
+
+            alert(
+              `Dimension Mismatch!\n\nExpected: ${expectedW}x${expectedH}mm\nUploaded File: ~${Math.round(actualWidthMm)}x${Math.round(actualHeightMm)}mm\n\nPlease check your file or use the correct drop zone.`,
+            );
+
+            setTimeout(() => {
+              dropZoneElement.innerHTML = originalText;
+              dropZoneElement.classList.remove("error");
+            }, 4000);
+
+            return; // Abort the script here so it doesn't process the wrong file
+          }
+          // --- END VALIDATION ---
+
+          dropZoneElement.innerHTML = "<strong>Processing Grid...</strong>";
+          const newPdf = await PDFLib.PDFDocument.create();
+
+          // Dimensions
+          const pageW = mmToPt(320);
+          const pageH = mmToPt(450);
+          const cutW = mmToPt(90);
+          const cutH = mmToPt(50);
+
+          const gutter = hasBleed ? mmToPt(4) : 0;
+          const drawW = hasBleed ? mmToPt(94) : mmToPt(90);
+          const drawH = hasBleed ? mmToPt(54) : mmToPt(50);
+          const offset = hasBleed ? mmToPt(2) : 0;
+
+          const cols = 3;
+          const rows = 8;
+
+          const gridTotalW = cols * cutW + (cols - 1) * gutter;
+          const gridTotalH = rows * cutH + (rows - 1) * gutter;
+
+          const startX = (pageW - gridTotalW) / 2;
+          const startY = (pageH - gridTotalH) / 2;
+
+          const pageIndices = originalPdf.getPageIndices();
+          const embeddedPages = await newPdf.embedPdf(originalPdf, pageIndices);
+
+          for (const embeddedPage of embeddedPages) {
+            const page = newPdf.addPage([pageW, pageH]);
+
+            // 1. DRAW GRID
+            for (let c = 0; c < cols; c++) {
+              for (let r = 0; r < rows; r++) {
+                page.drawPage(embeddedPage, {
+                  x: startX + c * (cutW + gutter) - offset,
+                  y: startY + r * (cutH + gutter) - offset,
+                  width: drawW,
+                  height: drawH,
+                });
+              }
+            }
+
+            // 2. DRAW CROP MARKS
+            const cropGap = mmToPt(2);
+            const cropLen = mmToPt(5);
+            const markColor = PDFLib.rgb(0, 0, 0);
+            const markThickness = 0.5;
+
+            if (hasBleed) {
+              for (let c = 0; c < cols; c++) {
+                const xLeft = startX + c * (cutW + gutter);
+                const xRight = xLeft + cutW;
+                page.drawLine({
+                  start: { x: xLeft, y: startY - cropGap },
+                  end: { x: xLeft, y: startY - cropGap - cropLen },
+                  thickness: markThickness,
+                  color: markColor,
+                });
+                page.drawLine({
+                  start: { x: xRight, y: startY - cropGap },
+                  end: { x: xRight, y: startY - cropGap - cropLen },
+                  thickness: markThickness,
+                  color: markColor,
+                });
+                page.drawLine({
+                  start: { x: xLeft, y: startY + gridTotalH + cropGap },
+                  end: { x: xLeft, y: startY + gridTotalH + cropGap + cropLen },
+                  thickness: markThickness,
+                  color: markColor,
+                });
+                page.drawLine({
+                  start: { x: xRight, y: startY + gridTotalH + cropGap },
+                  end: {
+                    x: xRight,
+                    y: startY + gridTotalH + cropGap + cropLen,
+                  },
+                  thickness: markThickness,
+                  color: markColor,
+                });
+              }
+              for (let r = 0; r < rows; r++) {
+                const yBottom = startY + r * (cutH + gutter);
+                const yTop = yBottom + cutH;
+                page.drawLine({
+                  start: { x: startX - cropGap, y: yBottom },
+                  end: { x: startX - cropGap - cropLen, y: yBottom },
+                  thickness: markThickness,
+                  color: markColor,
+                });
+                page.drawLine({
+                  start: { x: startX - cropGap, y: yTop },
+                  end: { x: startX - cropGap - cropLen, y: yTop },
+                  thickness: markThickness,
+                  color: markColor,
+                });
+                page.drawLine({
+                  start: { x: startX + gridTotalW + cropGap, y: yBottom },
+                  end: {
+                    x: startX + gridTotalW + cropGap + cropLen,
+                    y: yBottom,
+                  },
+                  thickness: markThickness,
+                  color: markColor,
+                });
+                page.drawLine({
+                  start: { x: startX + gridTotalW + cropGap, y: yTop },
+                  end: { x: startX + gridTotalW + cropGap + cropLen, y: yTop },
+                  thickness: markThickness,
+                  color: markColor,
+                });
+              }
+            } else {
+              for (let c = 0; c <= cols; c++) {
+                const x = startX + c * cutW;
+                page.drawLine({
+                  start: { x: x, y: startY - cropGap },
+                  end: { x: x, y: startY - cropGap - cropLen },
+                  thickness: markThickness,
+                  color: markColor,
+                });
+                page.drawLine({
+                  start: { x: x, y: startY + gridTotalH + cropGap },
+                  end: { x: x, y: startY + gridTotalH + cropGap + cropLen },
+                  thickness: markThickness,
+                  color: markColor,
+                });
+              }
+              for (let r = 0; r <= rows; r++) {
+                const y = startY + r * cutH;
+                page.drawLine({
+                  start: { x: startX - cropGap, y: y },
+                  end: { x: startX - cropGap - cropLen, y: y },
+                  thickness: markThickness,
+                  color: markColor,
+                });
+                page.drawLine({
+                  start: { x: startX + gridTotalW + cropGap, y: y },
+                  end: { x: startX + gridTotalW + cropGap + cropLen, y: y },
+                  thickness: markThickness,
+                  color: markColor,
+                });
+              }
+            }
+          }
+
+          // 3. EXPORT AND DOWNLOAD
+          const pdfBytes = await newPdf.save();
+
+          const originalBaseName = file.name.replace(/\.[^/.]+$/, "");
+          const suffix = hasBleed ? "SRA3_with_bleed" : "SRA3_no_bleed";
+          const newFileName = `${originalBaseName}_${suffix}.pdf`;
+
+          const blob = new Blob([pdfBytes], { type: "application/pdf" });
+          const url = URL.createObjectURL(blob);
+
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = newFileName;
+          document.body.appendChild(a);
+          a.click();
+
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+
+          dropZoneElement.innerHTML = `<strong>Success!</strong><span>${pageIndices.length} pages generated.</span>`;
+          setTimeout(() => (dropZoneElement.innerHTML = originalText), 3500);
+        } catch (error) {
+          console.error("Error modifying PDF:", error);
+          dropZoneElement.innerHTML =
+            "<strong>Error!</strong><span>Check console.</span>";
+          setTimeout(() => (dropZoneElement.innerHTML = originalText), 3000);
+        }
+      }
+    </script>
+  </body>
+</html>
