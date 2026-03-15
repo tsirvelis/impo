@@ -1,6 +1,4 @@
 // --- UI LOGIC & OVERRIDES ---
-
-// Toggles
 const modeToggle = document.getElementById("mode-toggle");
 const labelClone = document.getElementById("label-clone");
 const labelNest = document.getElementById("label-nest");
@@ -75,15 +73,12 @@ function updateDynamicText() {
   valBleed.innerText = b + " mm";
   valGutter.innerText = g + " mm";
 
-  // Exact stays strictly 90x50
   textBcExact.innerHTML = `90x50mm &rarr; ${orient}`;
 
-  // Bleed visually updates based on slider (90 + bleed*2)
   const dynamicW = 90 + b * 2;
   const dynamicH = 50 + b * 2;
   textBcBleed.innerHTML = `${dynamicW}x${dynamicH}mm &rarr; ${orient}`;
 
-  // Update Smart Fit
   textAutoBleed.innerHTML = `Dynamic Grid &bull; ${g}mm Gutter`;
 }
 
@@ -133,13 +128,17 @@ function setupDropZone(zoneId, config) {
   dropZone.addEventListener(
     "drop",
     (e) => {
+      // NEW: Allow PDFs, JPGs, and PNGs!
       const files = Array.from(e.dataTransfer.files).filter(
-        (f) => f.type === "application/pdf",
+        (f) =>
+          f.type === "application/pdf" ||
+          f.type === "image/jpeg" ||
+          f.type === "image/png",
       );
       if (files.length > 0) {
         processAndExportPDF(files, config, dropZone);
       } else {
-        alert("Please drop valid PDF files.");
+        alert("Please drop valid PDF, JPG, or PNG files.");
       }
     },
     false,
@@ -158,6 +157,20 @@ function ptToMm(pt) {
   return (pt * 25.4) / 72;
 }
 
+// Helper to stamp either a PDF Page or an Image
+const stampElement = (targetPage, element, xPos, yPos, w, h) => {
+  if (element.type === "page") {
+    targetPage.drawPage(element.obj, { x: xPos, y: yPos, width: w, height: h });
+  } else if (element.type === "image") {
+    targetPage.drawImage(element.obj, {
+      x: xPos,
+      y: yPos,
+      width: w,
+      height: h,
+    });
+  }
+};
+
 // --- MAIN ENGINE ---
 async function processAndExportPDF(filesArray, config, dropZoneElement) {
   const isNestingMode = modeToggle.checked;
@@ -166,7 +179,6 @@ async function processAndExportPDF(filesArray, config, dropZoneElement) {
   const isDuplexMode = duplexToggle.checked;
   const paperName = isSRA4 ? "SRA4" : "SRA3";
 
-  // Grab user overrides
   const userBleed = parseFloat(sliderBleed.value);
   const userGutter = parseFloat(sliderGutter.value);
 
@@ -179,26 +191,50 @@ async function processAndExportPDF(filesArray, config, dropZoneElement) {
     const helveticaFont = await newPdf.embedFont(
       PDFLib.StandardFonts.Helvetica,
     );
-    let allEmbeddedPages = [];
+
+    // Unified array to hold both PDF Pages and Images
+    let allElements = [];
     let artWMm = 0;
     let artHMm = 0;
 
-    // 1. BATCH VALIDATION
+    // 1. BATCH VALIDATION & EXTRACTION
     for (let i = 0; i < filesArray.length; i++) {
       const file = filesArray[i];
       const arrayBuffer = await file.arrayBuffer();
-      const originalPdf = await PDFLib.PDFDocument.load(arrayBuffer);
 
-      const firstPage = originalPdf.getPages()[0];
-      const { width, height } = firstPage.getSize();
-      const currentWMm = Math.round(ptToMm(width) * 10) / 10;
-      const currentHMm = Math.round(ptToMm(height) * 10) / 10;
+      let currentWMm, currentHMm;
+      let extractedItems = [];
 
+      // Check if it's a PDF or an Image
+      if (file.type === "application/pdf") {
+        const originalPdf = await PDFLib.PDFDocument.load(arrayBuffer);
+        const firstPage = originalPdf.getPages()[0];
+        const { width, height } = firstPage.getSize();
+
+        currentWMm = Math.round(ptToMm(width) * 10) / 10;
+        currentHMm = Math.round(ptToMm(height) * 10) / 10;
+
+        const pageIndices = originalPdf.getPageIndices();
+        const embeddedPages = await newPdf.embedPdf(originalPdf, pageIndices);
+        extractedItems = embeddedPages.map((p) => ({ type: "page", obj: p }));
+      } else {
+        // It's an Image! Embed it and calculate size based on 300 DPI
+        let img;
+        if (file.type === "image/jpeg")
+          img = await newPdf.embedJpg(arrayBuffer);
+        else img = await newPdf.embedPng(arrayBuffer);
+
+        currentWMm = Math.round((img.width / 300) * 25.4 * 10) / 10;
+        currentHMm = Math.round((img.height / 300) * 25.4 * 10) / 10;
+
+        extractedItems = [{ type: "image", obj: img }];
+      }
+
+      // Validation
       if (i === 0) {
         artWMm = currentWMm;
         artHMm = currentHMm;
         if (config.type === "bc") {
-          // Exact zone is strictly 90x50. Bleed zone calculates dynamic expected size!
           const expectedW = config.hasBleed ? 90 + userBleed * 2 : 90;
           const expectedH = config.hasBleed ? 50 + userBleed * 2 : 50;
           if (
@@ -206,7 +242,7 @@ async function processAndExportPDF(filesArray, config, dropZoneElement) {
             Math.abs(artHMm - expectedH) > 1.5
           ) {
             throw new Error(
-              `BC Size Error: Got ${Math.round(artWMm)}x${Math.round(artHMm)}mm.`,
+              `Size Error: Got ${Math.round(artWMm)}x${Math.round(artHMm)}mm.`,
             );
           }
         }
@@ -219,21 +255,16 @@ async function processAndExportPDF(filesArray, config, dropZoneElement) {
         }
       }
 
-      const pageIndices = originalPdf.getPageIndices();
-      const embeddedPages = await newPdf.embedPdf(originalPdf, pageIndices);
-      allEmbeddedPages.push(...embeddedPages);
+      allElements.push(...extractedItems);
     }
 
-    dropZoneElement.innerHTML = `<strong>Rendering...</strong><span>Processing ${allEmbeddedPages.length} pages</span>`;
+    dropZoneElement.innerHTML = `<strong>Rendering...</strong><span>Processing ${allElements.length} items</span>`;
 
     // 2. DYNAMIC MATH WITH OVERRIDES
     const sheetLongMm = isSRA4 ? 320 : 450;
     const sheetShortMm = isSRA4 ? 225 : 320;
 
-    // Apply sliders if it's a Bleed zone, otherwise 0
     const gutterMm = config.hasBleed ? userGutter : 0;
-
-    // Final trim size is the art size minus the custom bleed (from both sides)
     const cutWMm = config.hasBleed ? artWMm - userBleed * 2 : artWMm;
     const cutHMm = config.hasBleed ? artHMm - userBleed * 2 : artHMm;
 
@@ -282,8 +313,6 @@ async function processAndExportPDF(filesArray, config, dropZoneElement) {
     const gutter = mmToPt(gutterMm);
     const drawW = mmToPt(artWMm);
     const drawH = mmToPt(artHMm);
-
-    // Offset is how much we shift the artwork left/down to let the bleed hang out
     const offset = config.hasBleed ? mmToPt(userBleed) : 0;
 
     const gridTotalW = cols * cutW + (cols - 1) * gutter;
@@ -321,10 +350,7 @@ async function processAndExportPDF(filesArray, config, dropZoneElement) {
           });
           page.drawLine({
             start: { x: xRight, y: startY + gridTotalH + cropGap },
-            end: {
-              x: xRight,
-              y: startY + gridTotalH + cropGap + cropLen,
-            },
+            end: { x: xRight, y: startY + gridTotalH + cropGap + cropLen },
             thickness: markThickness,
             color: markColor,
           });
@@ -346,10 +372,7 @@ async function processAndExportPDF(filesArray, config, dropZoneElement) {
           });
           page.drawLine({
             start: { x: startX + gridTotalW + cropGap, y: yBottom },
-            end: {
-              x: startX + gridTotalW + cropGap + cropLen,
-              y: yBottom,
-            },
+            end: { x: startX + gridTotalW + cropGap + cropLen, y: yBottom },
             thickness: markThickness,
             color: markColor,
           });
@@ -407,10 +430,10 @@ async function processAndExportPDF(filesArray, config, dropZoneElement) {
     if (isNestingMode) {
       if (isDuplexMode) {
         let pairs = [];
-        for (let i = 0; i < allEmbeddedPages.length; i += 2) {
+        for (let i = 0; i < allElements.length; i += 2) {
           pairs.push({
-            front: allEmbeddedPages[i],
-            back: allEmbeddedPages[i + 1] || null,
+            front: allElements[i],
+            back: allElements[i + 1] || null,
           });
         }
 
@@ -425,21 +448,25 @@ async function processAndExportPDF(filesArray, config, dropZoneElement) {
             for (let c = 0; c < cols; c++) {
               if (currentPairIdx < totalPairs) {
                 const pair = pairs[currentPairIdx];
-                frontSheet.drawPage(pair.front, {
-                  x: startX + c * (cutW + gutter) - offset,
-                  y: startY + r * (cutH + gutter) - offset,
-                  width: drawW,
-                  height: drawH,
-                });
+                stampElement(
+                  frontSheet,
+                  pair.front,
+                  startX + c * (cutW + gutter) - offset,
+                  startY + r * (cutH + gutter) - offset,
+                  drawW,
+                  drawH,
+                );
 
                 if (pair.back) {
                   const mirroredC = cols - 1 - c;
-                  backSheet.drawPage(pair.back, {
-                    x: startX + mirroredC * (cutW + gutter) - offset,
-                    y: startY + r * (cutH + gutter) - offset,
-                    width: drawW,
-                    height: drawH,
-                  });
+                  stampElement(
+                    backSheet,
+                    pair.back,
+                    startX + mirroredC * (cutW + gutter) - offset,
+                    startY + r * (cutH + gutter) - offset,
+                    drawW,
+                    drawH,
+                  );
                 }
                 currentPairIdx++;
               }
@@ -450,7 +477,7 @@ async function processAndExportPDF(filesArray, config, dropZoneElement) {
         }
       } else {
         let currentPageIdx = 0;
-        const totalPages = allEmbeddedPages.length;
+        const totalPages = allElements.length;
 
         while (currentPageIdx < totalPages) {
           const page = newPdf.addPage([pageW, pageH]);
@@ -458,12 +485,14 @@ async function processAndExportPDF(filesArray, config, dropZoneElement) {
           for (let r = 0; r < rows; r++) {
             for (let c = 0; c < cols; c++) {
               if (currentPageIdx < totalPages) {
-                page.drawPage(allEmbeddedPages[currentPageIdx], {
-                  x: startX + c * (cutW + gutter) - offset,
-                  y: startY + r * (cutH + gutter) - offset,
-                  width: drawW,
-                  height: drawH,
-                });
+                stampElement(
+                  page,
+                  allElements[currentPageIdx],
+                  startX + c * (cutW + gutter) - offset,
+                  startY + r * (cutH + gutter) - offset,
+                  drawW,
+                  drawH,
+                );
                 currentPageIdx++;
               }
             }
@@ -472,17 +501,19 @@ async function processAndExportPDF(filesArray, config, dropZoneElement) {
         }
       }
     } else {
-      for (const embeddedPage of allEmbeddedPages) {
+      for (const element of allElements) {
         const page = newPdf.addPage([pageW, pageH]);
 
         for (let r = 0; r < rows; r++) {
           for (let c = 0; c < cols; c++) {
-            page.drawPage(embeddedPage, {
-              x: startX + c * (cutW + gutter) - offset,
-              y: startY + r * (cutH + gutter) - offset,
-              width: drawW,
-              height: drawH,
-            });
+            stampElement(
+              page,
+              element,
+              startX + c * (cutW + gutter) - offset,
+              startY + r * (cutH + gutter) - offset,
+              drawW,
+              drawH,
+            );
           }
         }
         drawCropMarksAndSlug(page);
