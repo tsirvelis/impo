@@ -3,28 +3,57 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>SRA3/SRA4 Pro Imposition | Next-Gen</title>
-
+    <title>Spauda.online | Pro Imposition</title>
+    <!-- NEW: Link the SVG Favicon -->
+    <link rel="icon" type="image/svg+xml" href="logo-svg.svg" />
     <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;500;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css" />
     <script src="https://unpkg.com/pdf-lib/dist/pdf-lib.min.js"></script>
+    <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <h1>beta v1</h1>
-    <p class="subtitle">
-      A.I. Prepress Matrix. Set parameters and upload targets.
-    </p>
+    <!-- Top Navigation / Theme Switch -->
+    <div class="top-bar">
+      <div class="brand">
+        <img src="logo-svg.svg" alt="Nexus Core Logo" class="brand-logo" />
+        Spauda<span>Online</span>
+      </div>
+      <div class="theme-switch-wrapper">
+        <span>🌙</span>
+        <label class="theme-switch">
+          <input type="checkbox" id="theme-toggle" />
+          <span class="theme-slider"></span>
+        </label>
+        <span>☀️</span>
+      </div>
+    </div>
 
+    <div class="header-titles">
+      <h1>Prepress Matrix</h1>
+      <p class="subtitle">
+        Set parameters, verify orientation, and drop PDF targets.
+      </p>
+    </div>
+
+    <!-- Primary Controls -->
     <div class="controls-wrapper">
-      <div class="mode-selector">
-        <span id="label-sra3" class="mode-label active">SRA3</span>
-        <label class="switch"
-          ><input type="checkbox" id="size-toggle" /><span class="slider"></span
-        ></label>
-        <span id="label-sra4" class="mode-label">SRA4</span>
+      <div class="select-group">
+        <select id="sheet-size">
+          <option value="SRA3">SRA3 Sheet (450x320mm)</option>
+          <option value="SRA4">SRA4 Sheet (320x225mm)</option>
+          <option value="A3">A3 Sheet (420x297mm)</option>
+          <option value="A4">A4 Sheet (297x210mm)</option>
+        </select>
+      </div>
+
+      <div class="select-group">
+        <select id="sheet-orient">
+          <option value="auto">Orientation: Auto-Fit</option>
+          <option value="portrait">Force Portrait Layout</option>
+          <option value="landscape">Force Landscape Layout</option>
+        </select>
       </div>
 
       <div class="mode-selector">
@@ -46,76 +75,143 @@
       </div>
     </div>
 
+    <!-- Advanced Parameters (Hidden by default) -->
     <button id="btn-overrides" class="overrides-toggle">
-      ⚙️ Advanced Parameters
+      <svg
+        width="16"
+        height="16"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
+        <circle cx="12" cy="12" r="3"></circle>
+        <path
+          d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"
+        ></path>
+      </svg>
+      Advanced Parameters
     </button>
+
     <div id="overrides-panel" class="overrides-panel">
-      <div class="mode-selector">
-        <span id="label-slug-off" class="mode-label">Label Off</span>
-        <label class="switch"
-          ><input type="checkbox" id="slug-toggle" checked /><span
-            class="slider"
-          ></span
-        ></label>
-        <span id="label-slug-on" class="mode-label active">Label On</span>
-      </div>
-      <div class="range-group">
-        <div class="range-header">
-          <span>Bleed Margin (Applied to Bleed Zones)</span
-          ><span class="range-val" id="val-bleed">2 mm</span>
+      <div class="panel-grid">
+        <div class="range-group">
+          <div class="range-header">
+            <span>Bleed Margin (Bleed Zones)</span
+            ><span class="range-val" id="val-bleed">2 mm</span>
+          </div>
+          <input
+            type="range"
+            id="slider-bleed"
+            min="0"
+            max="10"
+            step="1"
+            value="2"
+          />
         </div>
-        <input
-          type="range"
-          id="slider-bleed"
-          min="0"
-          max="10"
-          step="1"
-          value="2"
-        />
-      </div>
-      <div class="range-group">
-        <div class="range-header">
-          <span>Gutter Gap (Applied to Bleed Zones)</span
-          ><span class="range-val" id="val-gutter">4 mm</span>
+        <div class="range-group">
+          <div class="range-header">
+            <span>Gutter Gap (Bleed Zones)</span
+            ><span class="range-val" id="val-gutter">4 mm</span>
+          </div>
+          <input
+            type="range"
+            id="slider-gutter"
+            min="0"
+            max="20"
+            step="1"
+            value="4"
+          />
         </div>
-        <input
-          type="range"
-          id="slider-gutter"
-          min="0"
-          max="20"
-          step="1"
-          value="4"
-        />
+        <div class="range-group">
+          <div class="range-header">
+            <span>Crop Mark Length</span
+            ><span class="range-val" id="val-crop-len">5 mm</span>
+          </div>
+          <input
+            type="range"
+            id="slider-crop-len"
+            min="2"
+            max="15"
+            step="1"
+            value="5"
+          />
+        </div>
+        <div class="range-group">
+          <div class="range-header">
+            <span>Crop Mark Offset</span
+            ><span class="range-val" id="val-crop-gap">2 mm</span>
+          </div>
+          <input
+            type="range"
+            id="slider-crop-gap"
+            min="0"
+            max="10"
+            step="1"
+            value="2"
+          />
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="toggle-row">
+        <span>Print Dimensions Slug (Top Left)</span>
+        <div class="mode-selector">
+          <span id="label-slug-off" class="mode-label">Off</span>
+          <label class="switch"
+            ><input type="checkbox" id="slug-toggle" checked /><span
+              class="slider"
+            ></span
+          ></label>
+          <span id="label-slug-on" class="mode-label active">On</span>
+        </div>
       </div>
     </div>
 
+    <!-- Drop Zones Layout -->
     <div class="app-container">
       <div class="section-header"><span>Business Card Modules</span></div>
       <div class="zone-group">
-        <div id="zone-bc-exact" class="drop-zone zone-bc">
-          <strong>Standard Module</strong>
-          <span id="text-bc-exact">90x50mm &rarr; Portrait Base</span>
+        <div id="zone-bc-exact" class="drop-zone zone-standard">
+          <strong>Standard (Exact)</strong>
+          <span id="text-bc-exact">90x50mm</span>
         </div>
-
-        <div id="zone-bc-bleed" class="drop-zone zone-bc">
-          <strong>Bleed Module</strong>
-          <span id="text-bc-bleed">94x54mm &rarr; Portrait Base</span>
+        <div id="zone-bc-bleed" class="drop-zone zone-bleed">
+          <strong>Bleed Enabled</strong>
+          <span id="text-bc-bleed">94x54mm</span>
         </div>
       </div>
 
       <div class="section-header"><span>Smart Fit Modules</span></div>
       <div class="zone-group">
-        <div id="zone-auto-exact" class="drop-zone zone-auto">
+        <div id="zone-auto-exact" class="drop-zone zone-standard">
           <strong>Smart Fit (Exact)</strong>
           <span>Dynamic Grid &bull; No Gutter</span>
         </div>
-
-        <div id="zone-auto-bleed" class="drop-zone zone-auto">
+        <div id="zone-auto-bleed" class="drop-zone zone-bleed">
           <strong>Smart Fit (Bleed)</strong>
           <span id="text-auto-bleed">Dynamic Grid &bull; 4mm Gutter</span>
         </div>
       </div>
+
+      <div class="section-header"><span>Cut & Stack Pagination</span></div>
+      <div class="zone-group">
+        <div id="zone-cut-stack-exact" class="drop-zone zone-special">
+          <strong>Sequential (Exact)</strong>
+          <span>Ticket/Page Sorting &bull; No Gutter</span>
+        </div>
+        <div id="zone-cut-stack-bleed" class="drop-zone zone-special">
+          <strong>Sequential (Bleed)</strong>
+          <span id="text-cutstack-bleed"
+            >Ticket/Page Sorting &bull; 4mm Gutter</span
+          >
+        </div>
+      </div>
     </div>
-    <script src="app.js" defer></script>
+
+    <script src="app.js"></script>
   </body>
 </html>
