@@ -1,4 +1,3 @@
-// Import PDF-lib into the background worker
 importScripts("https://unpkg.com/pdf-lib/dist/pdf-lib.min.js");
 
 function mmToPt(mm) {
@@ -28,7 +27,7 @@ const SHEET_DIMENSIONS = {
 };
 
 self.onmessage = async (e) => {
-  const { files, config, params } = e.data;
+  const { files, params } = e.data;
 
   try {
     const newPdf = await PDFLib.PDFDocument.create();
@@ -40,14 +39,26 @@ self.onmessage = async (e) => {
     let artWMm = 0,
       artHMm = 0;
 
-    // --- PHASE 1: VALIDATION & EXTRACTION ---
+    // NEW: Variables to trap the raw physical size
+    let originalWMm = 0,
+      originalHMm = 0;
+
+    let type = "auto";
+    let hasBleed = true;
+
+    if (params.profileSelection.startsWith("bc")) type = "bc";
+    if (params.profileSelection.startsWith("cutstack")) type = "cutstack";
+    if (params.profileSelection === "booklet") type = "booklet";
+    if (params.profileSelection.endsWith("exact")) hasBleed = false;
+
     self.postMessage({
       type: "progress",
       title: "Extracting Data...",
-      detail: `Reading ${files.length} files`,
+      detail: `Reading ${files.length} payloads`,
       percent: 5,
     });
 
+    // --- PHASE 1: EXTRACTION ---
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       let currentWMm, currentHMm;
@@ -75,26 +86,32 @@ self.onmessage = async (e) => {
       }
 
       if (i === 0) {
+        // Trap the raw dimensions of the very first file to send back to the UI!
+        originalWMm = currentWMm;
+        originalHMm = currentHMm;
+
         if (params.forceScale) {
-          if (config.type === "bc") {
-            artWMm = config.hasBleed ? 90 + params.userBleed * 2 : 90;
-            artHMm = config.hasBleed ? 50 + params.userBleed * 2 : 50;
+          if (type === "bc") {
+            artWMm = hasBleed ? 90 + params.userBleed * 2 : 90;
+            artHMm = hasBleed ? 50 + params.userBleed * 2 : 50;
           } else {
-            artWMm = params.targetW;
-            artHMm = params.targetH;
+            const addedBleed =
+              !params.scaleIncludesBleed && hasBleed ? params.userBleed * 2 : 0;
+            artWMm = params.targetW + addedBleed;
+            artHMm = params.targetH + addedBleed;
           }
         } else {
           artWMm = currentWMm;
           artHMm = currentHMm;
-          if (config.type === "bc") {
-            const expectedW = config.hasBleed ? 90 + params.userBleed * 2 : 90;
-            const expectedH = config.hasBleed ? 50 + params.userBleed * 2 : 50;
+          if (type === "bc") {
+            const expectedW = hasBleed ? 90 + params.userBleed * 2 : 90;
+            const expectedH = hasBleed ? 50 + params.userBleed * 2 : 50;
             if (
               Math.abs(artWMm - expectedW) > 1.5 ||
               Math.abs(artHMm - expectedH) > 1.5
             ) {
               throw new Error(
-                `Size Error: Expected ${expectedW}x${expectedH}mm. Turn on 'Force Scale' to override.`,
+                `Size Error: Got ${Math.round(artWMm)}x${Math.round(artHMm)}mm instead of ${expectedW}x${expectedH}mm.`,
               );
             }
           }
@@ -106,29 +123,34 @@ self.onmessage = async (e) => {
             Math.abs(currentHMm - artHMm) > 1.5)
         ) {
           throw new Error(
-            `Batch Error! File dimension mismatch. Turn on 'Force Scale'.`,
+            `Batch Error! Multi-file sequence dimension mismatch.`,
           );
         }
       }
       allElements.push(...extractedItems);
-
-      // Update progress slightly during extraction
-      const prog = 5 + Math.round((i / files.length) * 15);
       self.postMessage({
         type: "progress",
         title: "Extracting Pages...",
         detail: `Processed ${allElements.length} pages`,
-        percent: prog,
+        percent: 5 + Math.round((i / files.length) * 15),
       });
     }
 
-    // --- PHASE 2: MATH & GRID LAYOUT ---
+    // NEW: Fire the trapped metrics back to the UI thread!
+    self.postMessage({
+      type: "fileInfo",
+      w: originalWMm,
+      h: originalHMm,
+      pages: allElements.length,
+    });
+
+    // --- PHASE 2: CALCULATE TARGET GEOMETRY ---
     const sheetLongMm = SHEET_DIMENSIONS[params.sheetSelection].long;
     const sheetShortMm = SHEET_DIMENSIONS[params.sheetSelection].short;
 
-    let gutterMm = config.hasBleed ? params.userGutter : 0;
-    const cutWMm = config.hasBleed ? artWMm - params.userBleed * 2 : artWMm;
-    const cutHMm = config.hasBleed ? artHMm - params.userBleed * 2 : artHMm;
+    let gutterMm = hasBleed ? params.userGutter : 0;
+    const cutWMm = hasBleed ? artWMm - params.userBleed * 2 : artWMm;
+    const cutHMm = hasBleed ? artHMm - params.userBleed * 2 : artHMm;
 
     const reserveMargin = (params.userCropLen + params.userCropGap + 2) * 2;
     const maxUsableLong = sheetLongMm - reserveMargin;
@@ -136,13 +158,15 @@ self.onmessage = async (e) => {
 
     let cols, rows, useLandscape;
 
-    if (config.type === "booklet") {
+    if (type === "booklet") {
       useLandscape = true;
       cols = 2;
       rows = 1;
       gutterMm = 0;
       if (cutWMm * 2 > maxUsableLong || cutHMm > maxUsableShort)
-        throw new Error(`Spread too large for ${params.sheetSelection}`);
+        throw new Error(
+          `Spread boundary fits outside ${params.sheetSelection}`,
+        );
     } else {
       const colsL = Math.floor(
         (maxUsableLong + gutterMm) / (cutWMm + gutterMm),
@@ -166,12 +190,18 @@ self.onmessage = async (e) => {
         cols = colsP;
         rows = rowsP;
       } else {
-        useLandscape = colsL * rowsL >= colsP * rowsP;
+        if (type === "bc" && params.sheetSelection === "SRA4")
+          useLandscape = true;
+        else if (type === "bc") useLandscape = false;
+        else useLandscape = colsL * rowsL >= colsP * rowsP;
+
         cols = useLandscape ? colsL : colsP;
         rows = useLandscape ? rowsL : rowsP;
       }
       if (cols === 0 || rows === 0)
-        throw new Error(`Artwork too large for ${params.sheetSelection}`);
+        throw new Error(
+          `Imposition Matrix calculations fall outside sheet dimensions.`,
+        );
     }
 
     const pageW = useLandscape ? mmToPt(sheetLongMm) : mmToPt(sheetShortMm);
@@ -181,7 +211,7 @@ self.onmessage = async (e) => {
     const gutter = mmToPt(gutterMm);
     const drawW = mmToPt(artWMm);
     const drawH = mmToPt(artHMm);
-    const offset = config.hasBleed ? mmToPt(params.userBleed) : 0;
+    const offset = hasBleed ? mmToPt(params.userBleed) : 0;
 
     const gridTotalW = cols * cutW + (cols - 1) * gutter;
     const gridTotalH = rows * cutH + (rows - 1) * gutter;
@@ -194,7 +224,7 @@ self.onmessage = async (e) => {
     const markThickness = 0.5;
 
     const drawCropMarksAndSlug = (page) => {
-      if (config.hasBleed) {
+      if (hasBleed) {
         for (let c = 0; c < cols; c++) {
           const xLeft = startX + c * (cutW + gutter);
           const xRight = xLeft + cutW;
@@ -294,24 +324,18 @@ self.onmessage = async (e) => {
       }
     };
 
-    // --- PHASE 3: SHEET GENERATION ---
+    // --- PHASE 3: GRID IMPOSITION MATRICES ---
     const totalSlots = cols * rows;
-
-    // Helper to send progress updates to the main thread during heavy loops
     const reportProgress = (current, total, prefix) => {
-      const baseProg = 20; // Starts at 20%
-      const remainingProg = 70; // Takes up 70% of the bar (saving takes the last 10%)
-      const currentProg =
-        baseProg + Math.round((current / total) * remainingProg);
       self.postMessage({
         type: "progress",
-        title: "Rendering Matrix...",
+        title: "Rendering Grid Matrix...",
         detail: `${prefix} ${current} of ${total}`,
-        percent: currentProg,
+        percent: 20 + Math.round((current / total) * 70),
       });
     };
 
-    if (config.type === "booklet") {
+    if (type === "booklet") {
       while (allElements.length % 4 !== 0) allElements.push(null);
       const totalPages = allElements.length;
       const sheets = totalPages / 4;
@@ -366,7 +390,7 @@ self.onmessage = async (e) => {
         drawCropMarksAndSlug(frontSheet);
         drawCropMarksAndSlug(backSheet);
       }
-    } else if (config.type === "cutstack") {
+    } else if (type === "cutstack") {
       if (params.isDuplexMode) {
         let pairs = [];
         for (let i = 0; i < allElements.length; i += 2)
@@ -443,7 +467,6 @@ self.onmessage = async (e) => {
             front: allElements[i],
             back: allElements[i + 1] || null,
           });
-
         let currentPairIdx = 0;
         let sheetCount = 0;
         const totalEstimatedSheets = Math.ceil(pairs.length / totalSlots);
@@ -453,7 +476,6 @@ self.onmessage = async (e) => {
           reportProgress(sheetCount, totalEstimatedSheets, "Sheets");
           const frontSheet = newPdf.addPage([pageW, pageH]);
           const backSheet = newPdf.addPage([pageW, pageH]);
-
           for (let r = 0; r < rows; r++) {
             for (let c = 0; c < cols; c++) {
               if (currentPairIdx < pairs.length) {
@@ -534,34 +556,29 @@ self.onmessage = async (e) => {
       }
     }
 
-    // --- PHASE 4: EXPORT ---
+    // --- PHASE 4: ENCODE EXPORT STREAM ---
     self.postMessage({
       type: "progress",
-      title: "Finalizing PDF...",
-      detail: "Compressing and securing output",
+      title: "Compiling Byte Stream...",
+      detail: "Optimizing object coordinate tables",
       percent: 95,
     });
-
     const pdfBytes = await newPdf.save();
 
     const baseName =
       files.length > 1
         ? "GangRun_Batch"
         : files[0].name.replace(/\.[^/.]+$/, "");
-    let printType = config.type === "bc" ? "BC" : "AutoFit";
-    if (config.type === "cutstack") printType = "CutStack";
-    if (config.type === "booklet") printType = "Booklet";
+    let exportPrintName = type.toUpperCase();
 
-    const suffix = config.hasBleed ? "bleed" : "exact";
+    const suffixLabel = hasBleed ? "bleed" : "exact";
     const modeLabel = params.isNestingMode ? "Nested" : "Cloned";
     const plexLabel = params.isDuplexMode ? "Duplex" : "Simplex";
 
-    let newFileName = `${baseName}_${params.sheetSelection}_${printType}_${cols}x${rows}_${modeLabel}_${plexLabel}_${suffix}.pdf`;
-    if (config.type === "booklet") {
-      newFileName = `${baseName}_${params.sheetSelection}_Booklet_Spreads_${suffix}.pdf`;
-    }
+    let newFileName = `${baseName}_${params.sheetSelection}_${exportPrintName}_${cols}x${rows}_${modeLabel}_${plexLabel}_${suffixLabel}.pdf`;
+    if (type === "booklet")
+      newFileName = `${baseName}_${params.sheetSelection}_Booklet_Spreads_${suffixLabel}.pdf`;
 
-    // Pass the finalized PDF buffer back to the Main UI Thread
     self.postMessage({ type: "success", pdfBytes, fileName: newFileName });
   } catch (error) {
     self.postMessage({ type: "error", message: error.message });
