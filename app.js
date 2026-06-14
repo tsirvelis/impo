@@ -54,6 +54,24 @@ slugToggle.addEventListener("change", (e) => {
   }
 });
 
+// Force Scale Toggle UI Logic
+const scaleToggle = document.getElementById("scale-toggle");
+const labelScaleOff = document.getElementById("label-scale-off");
+const labelScaleOn = document.getElementById("label-scale-on");
+const scaleInputs = document.getElementById("scale-inputs");
+
+scaleToggle.addEventListener("change", (e) => {
+  if (e.target.checked) {
+    labelScaleOn.classList.add("active");
+    labelScaleOff.classList.remove("active");
+    scaleInputs.style.display = "grid"; // Show the width/height boxes
+  } else {
+    labelScaleOff.classList.add("active");
+    labelScaleOn.classList.remove("active");
+    scaleInputs.style.display = "none"; // Hide them
+  }
+});
+
 const btnOverrides = document.getElementById("btn-overrides");
 const panelOverrides = document.getElementById("overrides-panel");
 const sliderBleed = document.getElementById("slider-bleed");
@@ -259,6 +277,12 @@ async function processAndExportPDF(filesArray, config, dropZoneElement) {
     let artWMm = 0,
       artHMm = 0;
 
+    // Grab the Scale Override values
+    const forceScale = scaleToggle.checked;
+    const targetW = parseFloat(document.getElementById("input-scale-w").value);
+    const targetH = parseFloat(document.getElementById("input-scale-h").value);
+
+    // 1. BATCH VALIDATION & EXTRACTION
     for (let i = 0; i < filesArray.length; i++) {
       const file = filesArray[i];
       const arrayBuffer = await file.arrayBuffer();
@@ -287,16 +311,46 @@ async function processAndExportPDF(filesArray, config, dropZoneElement) {
       }
 
       if (i === 0) {
-        artWMm = currentWMm;
-        artHMm = currentHMm;
+        if (forceScale) {
+          // AUTO-SCALE MODE: Ignore file size, force it to target!
+          if (config.type === "bc") {
+            // BC zones enforce their own size
+            artWMm = config.hasBleed ? 90 + userBleed * 2 : 90;
+            artHMm = config.hasBleed ? 50 + userBleed * 2 : 50;
+          } else {
+            // Smart zones use the custom inputs
+            artWMm = targetW;
+            artHMm = targetH;
+          }
+        } else {
+          // STRICT MODE: Auto-detect from first file
+          artWMm = currentWMm;
+          artHMm = currentHMm;
+          if (config.type === "bc") {
+            const expectedW = config.hasBleed ? 90 + userBleed * 2 : 90;
+            const expectedH = config.hasBleed ? 50 + userBleed * 2 : 50;
+            if (
+              Math.abs(artWMm - expectedW) > 1.5 ||
+              Math.abs(artHMm - expectedH) > 1.5
+            ) {
+              throw new Error(
+                `Size Error: Expected ${expectedW}x${expectedH}mm. Turn on 'Force Scale' to override.`,
+              );
+            }
+          }
+        }
       } else {
         if (
-          Math.abs(currentWMm - artWMm) > 1.5 ||
-          Math.abs(currentHMm - artHMm) > 1.5
+          !forceScale &&
+          (Math.abs(currentWMm - artWMm) > 1.5 ||
+            Math.abs(currentHMm - artHMm) > 1.5)
         ) {
-          throw new Error(`Batch Error! File dimension mismatch.`);
+          throw new Error(
+            `Batch Error! File dimension mismatch. Turn on 'Force Scale' to override.`,
+          );
         }
       }
+
       allElements.push(...extractedItems);
     }
 

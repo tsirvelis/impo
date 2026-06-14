@@ -179,6 +179,45 @@
           <span id="label-slug-on" class="mode-label active">On</span>
         </div>
       </div>
+      <div class="divider"></div>
+
+      <div class="toggle-row">
+        <span>Force Auto-Scale (Ignore Errors)</span>
+        <div class="mode-selector">
+          <span id="label-scale-off" class="mode-label active">Off</span>
+          <label class="switch"
+            ><input type="checkbox" id="scale-toggle" /><span
+              class="slider"
+            ></span
+          ></label>
+          <span id="label-scale-on" class="mode-label">On</span>
+        </div>
+      </div>
+
+      <div
+        class="panel-grid"
+        id="scale-inputs"
+        style="display: none; margin-top: 15px"
+      >
+        <div class="range-group">
+          <div class="range-header"><span>Target Width (mm)</span></div>
+          <input
+            type="number"
+            id="input-scale-w"
+            value="100"
+            class="num-input"
+          />
+        </div>
+        <div class="range-group">
+          <div class="range-header"><span>Target Height (mm)</span></div>
+          <input
+            type="number"
+            id="input-scale-h"
+            value="150"
+            class="num-input"
+          />
+        </div>
+      </div>
     </div>
 
     <!-- Drop Zones Layout -->
