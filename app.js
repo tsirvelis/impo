@@ -1,4 +1,4 @@
-// --- THEME LOGIC ---
+// --- ALL YOUR PREVIOUS UI TOGGLE LOGIC STAYS EXACTLY THE SAME ---
 const themeToggle = document.getElementById("theme-toggle");
 if (localStorage.getItem("theme") === "light") {
   document.body.classList.add("light-theme");
@@ -14,7 +14,6 @@ themeToggle.addEventListener("change", (e) => {
   }
 });
 
-// --- UI LOGIC & OVERRIDES ---
 const modeToggle = document.getElementById("mode-toggle");
 const labelClone = document.getElementById("label-clone");
 const labelNest = document.getElementById("label-nest");
@@ -54,21 +53,32 @@ slugToggle.addEventListener("change", (e) => {
   }
 });
 
-// Force Scale Toggle UI Logic
+const actionToggle = document.getElementById("action-toggle");
+const labelPreview = document.getElementById("label-preview");
+const labelDownload = document.getElementById("label-download");
+actionToggle.addEventListener("change", (e) => {
+  if (e.target.checked) {
+    labelDownload.classList.add("active");
+    labelPreview.classList.remove("active");
+  } else {
+    labelPreview.classList.add("active");
+    labelDownload.classList.remove("active");
+  }
+});
+
 const scaleToggle = document.getElementById("scale-toggle");
 const labelScaleOff = document.getElementById("label-scale-off");
 const labelScaleOn = document.getElementById("label-scale-on");
 const scaleInputs = document.getElementById("scale-inputs");
-
 scaleToggle.addEventListener("change", (e) => {
   if (e.target.checked) {
     labelScaleOn.classList.add("active");
     labelScaleOff.classList.remove("active");
-    scaleInputs.style.display = "grid"; // Show the width/height boxes
+    scaleInputs.style.display = "grid";
   } else {
     labelScaleOff.classList.add("active");
     labelScaleOn.classList.remove("active");
-    scaleInputs.style.display = "none"; // Hide them
+    scaleInputs.style.display = "none";
   }
 });
 
@@ -78,15 +88,12 @@ const sliderBleed = document.getElementById("slider-bleed");
 const sliderGutter = document.getElementById("slider-gutter");
 const sliderCropLen = document.getElementById("slider-crop-len");
 const sliderCropGap = document.getElementById("slider-crop-gap");
-
 const valBleed = document.getElementById("val-bleed");
 const valGutter = document.getElementById("val-gutter");
 const valCropLen = document.getElementById("val-crop-len");
 const valCropGap = document.getElementById("val-crop-gap");
-
 const sheetSizeSelect = document.getElementById("sheet-size");
 const sheetOrientSelect = document.getElementById("sheet-orient");
-
 const textBcExact = document.getElementById("text-bc-exact");
 const textBcBleed = document.getElementById("text-bc-bleed");
 const textAutoBleed = document.getElementById("text-auto-bleed");
@@ -103,16 +110,11 @@ function updateDynamicText() {
   valGutter.innerText = g + " mm";
   valCropLen.innerText = sliderCropLen.value + " mm";
   valCropGap.innerText = sliderCropGap.value + " mm";
-
   let orientText = "Auto Base";
   if (sheetOrientSelect.value === "portrait") orientText = "Portrait Base";
   if (sheetOrientSelect.value === "landscape") orientText = "Landscape Base";
-
   textBcExact.innerHTML = `90x50mm &rarr; ${orientText}`;
-  const dynamicW = 90 + b * 2;
-  const dynamicH = 50 + b * 2;
-  textBcBleed.innerHTML = `${dynamicW}x${dynamicH}mm &rarr; ${orientText}`;
-
+  textBcBleed.innerHTML = `${90 + b * 2}x${50 + b * 2}mm &rarr; ${orientText}`;
   textAutoBleed.innerHTML = `Dynamic Grid &bull; ${g}mm Gutter`;
   textCutStackBleed.innerHTML = `Ticket/Page Sorting &bull; ${g}mm Gutter`;
 }
@@ -123,38 +125,21 @@ sliderBleed.addEventListener("input", updateDynamicText);
 sliderGutter.addEventListener("input", updateDynamicText);
 sliderCropLen.addEventListener("input", updateDynamicText);
 sliderCropGap.addEventListener("input", updateDynamicText);
-
 updateDynamicText();
 
-// Output Action Toggle (Preview vs Download)
-const actionToggle = document.getElementById("action-toggle");
-const labelPreview = document.getElementById("label-preview");
-const labelDownload = document.getElementById("label-download");
-actionToggle.addEventListener("change", (e) => {
-  if (e.target.checked) {
-    labelDownload.classList.add("active");
-    labelPreview.classList.remove("active");
-  } else {
-    labelPreview.classList.add("active");
-    labelDownload.classList.remove("active");
-  }
-});
-
-// Modal Logic
+// --- PREVIEW MODAL LOGIC ---
 const previewModal = document.getElementById("preview-modal");
 const previewIframe = document.getElementById("preview-iframe");
 const btnModalClose = document.getElementById("btn-modal-close");
 const btnModalDownload = document.getElementById("btn-modal-download");
 const previewTitle = document.getElementById("preview-title");
-
 let currentBlobUrl = null;
 let currentFileName = "";
 
 btnModalClose.addEventListener("click", () => {
   previewModal.classList.remove("open");
-  setTimeout(() => (previewIframe.src = ""), 300); // Clear iframe to free memory
+  setTimeout(() => (previewIframe.src = ""), 300);
 });
-
 btnModalDownload.addEventListener("click", () => {
   if (currentBlobUrl) {
     const a = document.createElement("a");
@@ -165,6 +150,68 @@ btnModalDownload.addEventListener("click", () => {
     document.body.removeChild(a);
   }
 });
+
+// --- NEW: WEB WORKER LOGIC ---
+const worker = new Worker("worker.js");
+const progressOverlay = document.getElementById("progress-overlay");
+const progressTitle = document.getElementById("progress-title");
+const progressDetail = document.getElementById("progress-detail");
+const progressBar = document.getElementById("progress-bar");
+let currentDropZone = null;
+let originalZoneText = "";
+
+worker.onmessage = (e) => {
+  const msg = e.data;
+
+  if (msg.type === "progress") {
+    progressTitle.innerText = msg.title;
+    progressDetail.innerText = msg.detail;
+    progressBar.style.width = `${msg.percent}%`;
+  } else if (msg.type === "success") {
+    progressOverlay.classList.remove("open"); // Hide loading screen
+
+    const blob = new Blob([msg.pdfBytes], { type: "application/pdf" });
+    const url = URL.createObjectURL(blob);
+
+    if (actionToggle.checked) {
+      // DOWNLOAD
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = msg.fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } else {
+      // PREVIEW
+      currentBlobUrl = url;
+      currentFileName = msg.fileName;
+      previewTitle.innerText = msg.fileName;
+      previewIframe.src = url;
+      previewModal.classList.add("open");
+    }
+
+    if (currentDropZone) {
+      currentDropZone.innerHTML = `<strong style="color:var(--text-main)">Complete!</strong><span style="color:var(--accent-primary)">Output ready.</span>`;
+      setTimeout(() => (currentDropZone.innerHTML = originalZoneText), 4000);
+    }
+  } else if (msg.type === "error") {
+    progressOverlay.classList.remove("open");
+    if (currentDropZone) {
+      currentDropZone.classList.add("error");
+      let shortMsg =
+        msg.message.length > 40
+          ? msg.message.substring(0, 37) + "..."
+          : msg.message;
+      currentDropZone.innerHTML = `<strong>Abort!</strong><span>${shortMsg}</span>`;
+      setTimeout(() => {
+        currentDropZone.innerHTML = originalZoneText;
+        currentDropZone.classList.remove("error");
+      }, 5000);
+    }
+    alert("Matrix Error: " + msg.message);
+  }
+};
 
 // --- DRAG AND DROP SETUP ---
 ["dragenter", "dragover", "dragleave", "drop"].forEach((eventName) => {
@@ -197,7 +244,7 @@ function setupDropZone(zoneId, config) {
 
   dropZone.addEventListener(
     "drop",
-    (e) => {
+    async (e) => {
       const files = Array.from(e.dataTransfer.files).filter(
         (f) =>
           f.type === "application/pdf" ||
@@ -205,7 +252,50 @@ function setupDropZone(zoneId, config) {
           f.type === "image/png",
       );
       if (files.length > 0) {
-        processAndExportPDF(files, config, dropZone);
+        currentDropZone = dropZone;
+        originalZoneText = dropZone.innerHTML;
+
+        // Open Loading Screen
+        progressTitle.innerText = "Initializing Engine...";
+        progressDetail.innerText = "Reading file data";
+        progressBar.style.width = "0%";
+        progressOverlay.classList.add("open");
+
+        // Convert files to raw buffers for the Web Worker
+        const filePayload = [];
+        const buffersToTransfer = [];
+
+        for (let file of files) {
+          const buffer = await file.arrayBuffer();
+          filePayload.push({
+            name: file.name,
+            type: file.type,
+            buffer: buffer,
+          });
+          buffersToTransfer.push(buffer); // We transfer ownership for extreme performance
+        }
+
+        // Collect all UI state parameters
+        const params = {
+          isNestingMode: modeToggle.checked,
+          isDuplexMode: duplexToggle.checked,
+          addSlug: slugToggle.checked,
+          forceScale: scaleToggle.checked,
+          sheetSelection: sheetSizeSelect.value,
+          orientSelection: sheetOrientSelect.value,
+          userBleed: parseFloat(sliderBleed.value),
+          userGutter: parseFloat(sliderGutter.value),
+          userCropLen: parseFloat(sliderCropLen.value),
+          userCropGap: parseFloat(sliderCropGap.value),
+          targetW: parseFloat(document.getElementById("input-scale-w").value),
+          targetH: parseFloat(document.getElementById("input-scale-h").value),
+        };
+
+        // Send to background thread!
+        worker.postMessage(
+          { files: filePayload, config, params },
+          buffersToTransfer,
+        );
       } else {
         alert("Please drop valid PDF, JPG, or PNG files.");
       }
@@ -214,595 +304,10 @@ function setupDropZone(zoneId, config) {
   );
 }
 
-// Init all 7 Zones
 setupDropZone("zone-bc-exact", { type: "bc", hasBleed: false });
 setupDropZone("zone-bc-bleed", { type: "bc", hasBleed: true });
 setupDropZone("zone-auto-exact", { type: "auto", hasBleed: false });
 setupDropZone("zone-auto-bleed", { type: "auto", hasBleed: true });
 setupDropZone("zone-cut-stack-exact", { type: "cutstack", hasBleed: false });
 setupDropZone("zone-cut-stack-bleed", { type: "cutstack", hasBleed: true });
-setupDropZone("zone-booklet", { type: "booklet", hasBleed: true }); // NEW ZONE
-
-function mmToPt(mm) {
-  return (mm * 72) / 25.4;
-}
-function ptToMm(pt) {
-  return (pt * 25.4) / 72;
-}
-
-const stampElement = (targetPage, element, xPos, yPos, w, h) => {
-  if (element.type === "page")
-    targetPage.drawPage(element.obj, { x: xPos, y: yPos, width: w, height: h });
-  else if (element.type === "image")
-    targetPage.drawImage(element.obj, {
-      x: xPos,
-      y: yPos,
-      width: w,
-      height: h,
-    });
-};
-
-const SHEET_DIMENSIONS = {
-  SRA3: { long: 450, short: 320 },
-  SRA4: { long: 320, short: 225 },
-  A3: { long: 420, short: 297 },
-  A4: { long: 297, short: 210 },
-};
-
-// --- MAIN ENGINE ---
-async function processAndExportPDF(filesArray, config, dropZoneElement) {
-  const isNestingMode = modeToggle.checked;
-  const isDuplexMode = duplexToggle.checked;
-  const addSlug = slugToggle.checked;
-
-  const sheetSelection = sheetSizeSelect.value;
-  const orientSelection = sheetOrientSelect.value;
-
-  const userBleed = parseFloat(sliderBleed.value);
-  const userGutter = parseFloat(sliderGutter.value);
-  const userCropLen = parseFloat(sliderCropLen.value);
-  const userCropGap = parseFloat(sliderCropGap.value);
-
-  const originalText = dropZoneElement.innerHTML;
-  dropZoneElement.classList.remove("error");
-  dropZoneElement.innerHTML = `<strong style="color:var(--text-main)">Processing...</strong><span style="color:var(--accent-primary)">Validating Data</span>`;
-
-  try {
-    const newPdf = await PDFLib.PDFDocument.create();
-    const helveticaFont = await newPdf.embedFont(
-      PDFLib.StandardFonts.Helvetica,
-    );
-
-    let allElements = [];
-    let artWMm = 0,
-      artHMm = 0;
-
-    // Grab the Scale Override values
-    const forceScale = scaleToggle.checked;
-    const targetW = parseFloat(document.getElementById("input-scale-w").value);
-    const targetH = parseFloat(document.getElementById("input-scale-h").value);
-
-    // 1. BATCH VALIDATION & EXTRACTION
-    for (let i = 0; i < filesArray.length; i++) {
-      const file = filesArray[i];
-      const arrayBuffer = await file.arrayBuffer();
-      let currentWMm, currentHMm;
-      let extractedItems = [];
-
-      if (file.type === "application/pdf") {
-        const originalPdf = await PDFLib.PDFDocument.load(arrayBuffer);
-        const firstPage = originalPdf.getPages()[0];
-        const { width, height } = firstPage.getSize();
-        currentWMm = Math.round(ptToMm(width) * 10) / 10;
-        currentHMm = Math.round(ptToMm(height) * 10) / 10;
-
-        const pageIndices = originalPdf.getPageIndices();
-        const embeddedPages = await newPdf.embedPdf(originalPdf, pageIndices);
-        extractedItems = embeddedPages.map((p) => ({ type: "page", obj: p }));
-      } else {
-        let img;
-        if (file.type === "image/jpeg")
-          img = await newPdf.embedJpg(arrayBuffer);
-        else img = await newPdf.embedPng(arrayBuffer);
-
-        currentWMm = Math.round((img.width / 300) * 25.4 * 10) / 10;
-        currentHMm = Math.round((img.height / 300) * 25.4 * 10) / 10;
-        extractedItems = [{ type: "image", obj: img }];
-      }
-
-      if (i === 0) {
-        if (forceScale) {
-          // AUTO-SCALE MODE: Ignore file size, force it to target!
-          if (config.type === "bc") {
-            // BC zones enforce their own size
-            artWMm = config.hasBleed ? 90 + userBleed * 2 : 90;
-            artHMm = config.hasBleed ? 50 + userBleed * 2 : 50;
-          } else {
-            // Smart zones use the custom inputs
-            artWMm = targetW;
-            artHMm = targetH;
-          }
-        } else {
-          // STRICT MODE: Auto-detect from first file
-          artWMm = currentWMm;
-          artHMm = currentHMm;
-          if (config.type === "bc") {
-            const expectedW = config.hasBleed ? 90 + userBleed * 2 : 90;
-            const expectedH = config.hasBleed ? 50 + userBleed * 2 : 50;
-            if (
-              Math.abs(artWMm - expectedW) > 1.5 ||
-              Math.abs(artHMm - expectedH) > 1.5
-            ) {
-              throw new Error(
-                `Size Error: Expected ${expectedW}x${expectedH}mm. Turn on 'Force Scale' to override.`,
-              );
-            }
-          }
-        }
-      } else {
-        if (
-          !forceScale &&
-          (Math.abs(currentWMm - artWMm) > 1.5 ||
-            Math.abs(currentHMm - artHMm) > 1.5)
-        ) {
-          throw new Error(
-            `Batch Error! File dimension mismatch. Turn on 'Force Scale' to override.`,
-          );
-        }
-      }
-
-      allElements.push(...extractedItems);
-    }
-
-    dropZoneElement.innerHTML = `<strong style="color:var(--text-main)">Building Grid...</strong><span style="color:var(--accent-primary)">Layout Generation</span>`;
-
-    const sheetLongMm = SHEET_DIMENSIONS[sheetSelection].long;
-    const sheetShortMm = SHEET_DIMENSIONS[sheetSelection].short;
-
-    let gutterMm = config.hasBleed ? userGutter : 0;
-    const cutWMm = config.hasBleed ? artWMm - userBleed * 2 : artWMm;
-    const cutHMm = config.hasBleed ? artHMm - userBleed * 2 : artHMm;
-
-    const reserveMargin = (userCropLen + userCropGap + 2) * 2;
-    const maxUsableLong = sheetLongMm - reserveMargin;
-    const maxUsableShort = sheetShortMm - reserveMargin;
-
-    let cols, rows, useLandscape;
-
-    if (config.type === "booklet") {
-      // NEW: BOOKLET OVERRIDES
-      useLandscape = true;
-      cols = 2;
-      rows = 1;
-      gutterMm = 0; // Booklets have 0 gutter on the spine fold
-      if (cutWMm * 2 > maxUsableLong || cutHMm > maxUsableShort)
-        throw new Error(`Spread too large for ${sheetSelection}`);
-    } else {
-      const colsL = Math.floor(
-        (maxUsableLong + gutterMm) / (cutWMm + gutterMm),
-      );
-      const rowsL = Math.floor(
-        (maxUsableShort + gutterMm) / (cutHMm + gutterMm),
-      );
-      const colsP = Math.floor(
-        (maxUsableShort + gutterMm) / (cutWMm + gutterMm),
-      );
-      const rowsP = Math.floor(
-        (maxUsableLong + gutterMm) / (cutHMm + gutterMm),
-      );
-
-      if (orientSelection === "landscape") {
-        useLandscape = true;
-        cols = colsL;
-        rows = rowsL;
-      } else if (orientSelection === "portrait") {
-        useLandscape = false;
-        cols = colsP;
-        rows = rowsP;
-      } else {
-        useLandscape = colsL * rowsL >= colsP * rowsP;
-        cols = useLandscape ? colsL : colsP;
-        rows = useLandscape ? rowsL : rowsP;
-      }
-
-      if (cols === 0 || rows === 0)
-        throw new Error(`Artwork too large for ${sheetSelection}`);
-    }
-
-    const pageW = useLandscape ? mmToPt(sheetLongMm) : mmToPt(sheetShortMm);
-    const pageH = useLandscape ? mmToPt(sheetShortMm) : mmToPt(sheetLongMm);
-    const cutW = mmToPt(cutWMm);
-    const cutH = mmToPt(cutHMm);
-    const gutter = mmToPt(gutterMm);
-    const drawW = mmToPt(artWMm);
-    const drawH = mmToPt(artHMm);
-    const offset = config.hasBleed ? mmToPt(userBleed) : 0;
-
-    const gridTotalW = cols * cutW + (cols - 1) * gutter;
-    const gridTotalH = rows * cutH + (rows - 1) * gutter;
-    const startX = (pageW - gridTotalW) / 2;
-    const startY = (pageH - gridTotalH) / 2;
-
-    const cropGap = mmToPt(userCropGap);
-    const cropLen = mmToPt(userCropLen);
-    const markColor = PDFLib.rgb(0, 0, 0);
-    const markThickness = 0.5;
-
-    const drawCropMarksAndSlug = (page) => {
-      if (config.hasBleed) {
-        for (let c = 0; c < cols; c++) {
-          const xLeft = startX + c * (cutW + gutter);
-          const xRight = xLeft + cutW;
-          page.drawLine({
-            start: { x: xLeft, y: startY - cropGap },
-            end: { x: xLeft, y: startY - cropGap - cropLen },
-            thickness: markThickness,
-            color: markColor,
-          });
-          page.drawLine({
-            start: { x: xRight, y: startY - cropGap },
-            end: { x: xRight, y: startY - cropGap - cropLen },
-            thickness: markThickness,
-            color: markColor,
-          });
-          page.drawLine({
-            start: { x: xLeft, y: startY + gridTotalH + cropGap },
-            end: { x: xLeft, y: startY + gridTotalH + cropGap + cropLen },
-            thickness: markThickness,
-            color: markColor,
-          });
-          page.drawLine({
-            start: { x: xRight, y: startY + gridTotalH + cropGap },
-            end: { x: xRight, y: startY + gridTotalH + cropGap + cropLen },
-            thickness: markThickness,
-            color: markColor,
-          });
-        }
-        for (let r = 0; r < rows; r++) {
-          const yBottom = startY + r * (cutH + gutter);
-          const yTop = yBottom + cutH;
-          page.drawLine({
-            start: { x: startX - cropGap, y: yBottom },
-            end: { x: startX - cropGap - cropLen, y: yBottom },
-            thickness: markThickness,
-            color: markColor,
-          });
-          page.drawLine({
-            start: { x: startX - cropGap, y: yTop },
-            end: { x: startX - cropGap - cropLen, y: yTop },
-            thickness: markThickness,
-            color: markColor,
-          });
-          page.drawLine({
-            start: { x: startX + gridTotalW + cropGap, y: yBottom },
-            end: { x: startX + gridTotalW + cropGap + cropLen, y: yBottom },
-            thickness: markThickness,
-            color: markColor,
-          });
-          page.drawLine({
-            start: { x: startX + gridTotalW + cropGap, y: yTop },
-            end: { x: startX + gridTotalW + cropGap + cropLen, y: yTop },
-            thickness: markThickness,
-            color: markColor,
-          });
-        }
-      } else {
-        for (let c = 0; c <= cols; c++) {
-          const x = startX + c * cutW;
-          page.drawLine({
-            start: { x: x, y: startY - cropGap },
-            end: { x: x, y: startY - cropGap - cropLen },
-            thickness: markThickness,
-            color: markColor,
-          });
-          page.drawLine({
-            start: { x: x, y: startY + gridTotalH + cropGap },
-            end: { x: x, y: startY + gridTotalH + cropGap + cropLen },
-            thickness: markThickness,
-            color: markColor,
-          });
-        }
-        for (let r = 0; r <= rows; r++) {
-          const y = startY + r * cutH;
-          page.drawLine({
-            start: { x: startX - cropGap, y: y },
-            end: { x: startX - cropGap - cropLen, y: y },
-            thickness: markThickness,
-            color: markColor,
-          });
-          page.drawLine({
-            start: { x: startX + gridTotalW + cropGap, y: y },
-            end: { x: startX + gridTotalW + cropGap + cropLen, y: y },
-            thickness: markThickness,
-            color: markColor,
-          });
-        }
-      }
-      if (addSlug) {
-        page.drawText(`${artWMm} x ${artHMm} mm`, {
-          x: startX + 3,
-          y: startY + gridTotalH + cropGap + 1,
-          size: 4,
-          font: helveticaFont,
-          color: markColor,
-        });
-      }
-    };
-
-    const totalSlots = cols * rows;
-
-    // --- 3. BUILD THE PDF MATRIX ---
-
-    if (config.type === "booklet") {
-      // --- NEW: BOOKLET (PRINTER'S SPREADS) LOGIC ---
-      // 1. Pad array with blanks until it's a multiple of 4
-      while (allElements.length % 4 !== 0) {
-        allElements.push(null);
-      }
-
-      const totalPages = allElements.length;
-      const sheets = totalPages / 4;
-
-      for (let s = 0; s < sheets; s++) {
-        const frontSheet = newPdf.addPage([pageW, pageH]);
-        const backSheet = newPdf.addPage([pageW, pageH]);
-
-        // Mathematically calculate the pairs
-        const fLeft = allElements[totalPages - 1 - s * 2];
-        const fRight = allElements[s * 2];
-        const bLeft = allElements[s * 2 + 1];
-        const bRight = allElements[totalPages - 2 - s * 2];
-
-        // Front Spread (Left col = 0, Right col = 1)
-        if (fLeft)
-          stampElement(
-            frontSheet,
-            fLeft,
-            startX - offset,
-            startY - offset,
-            drawW,
-            drawH,
-          );
-        if (fRight)
-          stampElement(
-            frontSheet,
-            fRight,
-            startX + cutW - offset,
-            startY - offset,
-            drawW,
-            drawH,
-          );
-
-        // Back Spread
-        if (bLeft)
-          stampElement(
-            backSheet,
-            bLeft,
-            startX - offset,
-            startY - offset,
-            drawW,
-            drawH,
-          );
-        if (bRight)
-          stampElement(
-            backSheet,
-            bRight,
-            startX + cutW - offset,
-            startY - offset,
-            drawW,
-            drawH,
-          );
-
-        drawCropMarksAndSlug(frontSheet);
-        drawCropMarksAndSlug(backSheet);
-      }
-    } else if (config.type === "cutstack") {
-      if (isDuplexMode) {
-        let pairs = [];
-        for (let i = 0; i < allElements.length; i += 2)
-          pairs.push({
-            front: allElements[i],
-            back: allElements[i + 1] || null,
-          });
-        const sheetsNeeded = Math.ceil(pairs.length / totalSlots);
-
-        for (let s = 0; s < sheetsNeeded; s++) {
-          const frontSheet = newPdf.addPage([pageW, pageH]);
-          const backSheet = newPdf.addPage([pageW, pageH]);
-          for (let r = 0; r < rows; r++) {
-            for (let c = 0; c < cols; c++) {
-              let slotIdx = r * cols + c;
-              let pairIdx = slotIdx * sheetsNeeded + s;
-              if (pairIdx < pairs.length) {
-                const pair = pairs[pairIdx];
-                stampElement(
-                  frontSheet,
-                  pair.front,
-                  startX + c * (cutW + gutter) - offset,
-                  startY + r * (cutH + gutter) - offset,
-                  drawW,
-                  drawH,
-                );
-                if (pair.back) {
-                  const mirroredC = cols - 1 - c;
-                  stampElement(
-                    backSheet,
-                    pair.back,
-                    startX + mirroredC * (cutW + gutter) - offset,
-                    startY + r * (cutH + gutter) - offset,
-                    drawW,
-                    drawH,
-                  );
-                }
-              }
-            }
-          }
-          drawCropMarksAndSlug(frontSheet);
-          drawCropMarksAndSlug(backSheet);
-        }
-      } else {
-        const sheetsNeeded = Math.ceil(allElements.length / totalSlots);
-        for (let s = 0; s < sheetsNeeded; s++) {
-          const page = newPdf.addPage([pageW, pageH]);
-          for (let r = 0; r < rows; r++) {
-            for (let c = 0; c < cols; c++) {
-              let slotIdx = r * cols + c;
-              let elementIdx = slotIdx * sheetsNeeded + s;
-              if (elementIdx < allElements.length) {
-                stampElement(
-                  page,
-                  allElements[elementIdx],
-                  startX + c * (cutW + gutter) - offset,
-                  startY + r * (cutH + gutter) - offset,
-                  drawW,
-                  drawH,
-                );
-              }
-            }
-          }
-          drawCropMarksAndSlug(page);
-        }
-      }
-    } else if (isNestingMode) {
-      if (isDuplexMode) {
-        let pairs = [];
-        for (let i = 0; i < allElements.length; i += 2)
-          pairs.push({
-            front: allElements[i],
-            back: allElements[i + 1] || null,
-          });
-
-        let currentPairIdx = 0;
-        while (currentPairIdx < pairs.length) {
-          const frontSheet = newPdf.addPage([pageW, pageH]);
-          const backSheet = newPdf.addPage([pageW, pageH]);
-
-          for (let r = 0; r < rows; r++) {
-            for (let c = 0; c < cols; c++) {
-              if (currentPairIdx < pairs.length) {
-                const pair = pairs[currentPairIdx];
-                stampElement(
-                  frontSheet,
-                  pair.front,
-                  startX + c * (cutW + gutter) - offset,
-                  startY + r * (cutH + gutter) - offset,
-                  drawW,
-                  drawH,
-                );
-                if (pair.back) {
-                  const mirroredC = cols - 1 - c;
-                  stampElement(
-                    backSheet,
-                    pair.back,
-                    startX + mirroredC * (cutW + gutter) - offset,
-                    startY + r * (cutH + gutter) - offset,
-                    drawW,
-                    drawH,
-                  );
-                }
-                currentPairIdx++;
-              }
-            }
-          }
-          drawCropMarksAndSlug(frontSheet);
-          drawCropMarksAndSlug(backSheet);
-        }
-      } else {
-        let currentPageIdx = 0;
-        while (currentPageIdx < allElements.length) {
-          const page = newPdf.addPage([pageW, pageH]);
-          for (let r = 0; r < rows; r++) {
-            for (let c = 0; c < cols; c++) {
-              if (currentPageIdx < allElements.length) {
-                stampElement(
-                  page,
-                  allElements[currentPageIdx],
-                  startX + c * (cutW + gutter) - offset,
-                  startY + r * (cutH + gutter) - offset,
-                  drawW,
-                  drawH,
-                );
-                currentPageIdx++;
-              }
-            }
-          }
-          drawCropMarksAndSlug(page);
-        }
-      }
-    } else {
-      // CLONE MODE
-      for (const element of allElements) {
-        const page = newPdf.addPage([pageW, pageH]);
-        for (let r = 0; r < rows; r++) {
-          for (let c = 0; c < cols; c++) {
-            stampElement(
-              page,
-              element,
-              startX + c * (cutW + gutter) - offset,
-              startY + r * (cutH + gutter) - offset,
-              drawW,
-              drawH,
-            );
-          }
-        }
-        drawCropMarksAndSlug(page);
-      }
-    }
-
-    // 4. EXPORT OR PREVIEW
-    const pdfBytes = await newPdf.save();
-
-    const baseName =
-      filesArray.length > 1
-        ? "GangRun_Batch"
-        : filesArray[0].name.replace(/\.[^/.]+$/, "");
-    let printType = config.type === "bc" ? "BC" : "AutoFit";
-    if (config.type === "cutstack") printType = "CutStack";
-    if (config.type === "booklet") printType = "Booklet";
-
-    const suffix = config.hasBleed ? "bleed" : "exact";
-    const modeLabel = isNestingMode ? "Nested" : "Cloned";
-    const plexLabel = isDuplexMode ? "Duplex" : "Simplex";
-
-    let newFileName = `${baseName}_${sheetSelection}_${printType}_${cols}x${rows}_${modeLabel}_${plexLabel}_${suffix}.pdf`;
-    if (config.type === "booklet") {
-      newFileName = `${baseName}_${sheetSelection}_Booklet_Spreads_${suffix}.pdf`;
-    }
-
-    const blob = new Blob([pdfBytes], { type: "application/pdf" });
-    const url = URL.createObjectURL(blob);
-
-    if (actionToggle.checked) {
-      // DOWNLOAD MODE
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = newFileName;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 1000); // cleanup
-    } else {
-      // PREVIEW MODE
-      currentBlobUrl = url;
-      currentFileName = newFileName;
-      previewTitle.innerText = newFileName;
-      previewIframe.src = url;
-      previewModal.classList.add("open");
-    }
-
-    dropZoneElement.innerHTML = `<strong style="color:var(--text-main)">Complete!</strong><span style="color:var(--accent-primary)">Output ready.</span>`;
-    setTimeout(() => (dropZoneElement.innerHTML = originalText), 4000);
-  } catch (error) {
-    console.error("Matrix Error:", error);
-    dropZoneElement.classList.add("error");
-    let shortMsg =
-      error.message.length > 40
-        ? error.message.substring(0, 37) + "..."
-        : error.message;
-    dropZoneElement.innerHTML = `<strong>Abort!</strong><span>${shortMsg}</span>`;
-    setTimeout(() => {
-      dropZoneElement.innerHTML = originalText;
-      dropZoneElement.classList.remove("error");
-    }, 5000);
-  }
-}
+setupDropZone("zone-booklet", { type: "booklet", hasBleed: true });
