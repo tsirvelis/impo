@@ -47,6 +47,16 @@
           <option value="A4">A4 Sheet (297x210mm)</option>
         </select>
       </div>
+      <div class="mode-selector">
+        <span id="label-preview" class="mode-label active">Preview</span>
+        <label class="switch"
+          ><input type="checkbox" id="action-toggle" /><span
+            class="slider"
+            id="action-slider"
+          ></span
+        ></label>
+        <span id="label-download" class="mode-label">Download</span>
+      </div>
 
       <div class="select-group">
         <select id="sheet-orient">
@@ -197,7 +207,7 @@
         </div>
       </div>
 
-      <div class="section-header"><span>Cut & Stack Pagination</span></div>
+      <div class="section-header"><span>Pagination & Booklets</span></div>
       <div class="zone-group">
         <div id="zone-cut-stack-exact" class="drop-zone zone-special">
           <strong>Sequential (Exact)</strong>
@@ -209,9 +219,27 @@
             >Ticket/Page Sorting &bull; 4mm Gutter</span
           >
         </div>
+
+        <div id="zone-booklet" class="drop-zone zone-booklet">
+          <strong>Saddle Stitch Booklet</strong>
+          <span>Printer's Spreads &bull; Auto-Pagination</span>
+        </div>
       </div>
     </div>
-
+    <div id="preview-modal" class="preview-modal">
+      <div class="preview-container">
+        <div class="preview-header">
+          <span id="preview-title">Document Preview</span>
+          <div class="preview-actions">
+            <button id="btn-modal-download" class="btn-primary">
+              Download PDF
+            </button>
+            <button id="btn-modal-close" class="btn-close">✕</button>
+          </div>
+        </div>
+        <iframe id="preview-iframe" src=""></iframe>
+      </div>
+    </div>
     <script src="app.js"></script>
   </body>
 </html>

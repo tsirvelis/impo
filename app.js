@@ -1,6 +1,5 @@
 // --- THEME LOGIC ---
 const themeToggle = document.getElementById("theme-toggle");
-// Check local storage for preference
 if (localStorage.getItem("theme") === "light") {
   document.body.classList.add("light-theme");
   themeToggle.checked = true;
@@ -82,19 +81,16 @@ btnOverrides.addEventListener("click", () => {
 function updateDynamicText() {
   const b = parseFloat(sliderBleed.value);
   const g = parseFloat(sliderGutter.value);
-
   valBleed.innerText = b + " mm";
   valGutter.innerText = g + " mm";
   valCropLen.innerText = sliderCropLen.value + " mm";
   valCropGap.innerText = sliderCropGap.value + " mm";
 
-  // Determine text based on orientation selection
   let orientText = "Auto Base";
   if (sheetOrientSelect.value === "portrait") orientText = "Portrait Base";
   if (sheetOrientSelect.value === "landscape") orientText = "Landscape Base";
 
   textBcExact.innerHTML = `90x50mm &rarr; ${orientText}`;
-
   const dynamicW = 90 + b * 2;
   const dynamicH = 50 + b * 2;
   textBcBleed.innerHTML = `${dynamicW}x${dynamicH}mm &rarr; ${orientText}`;
@@ -110,8 +106,47 @@ sliderGutter.addEventListener("input", updateDynamicText);
 sliderCropLen.addEventListener("input", updateDynamicText);
 sliderCropGap.addEventListener("input", updateDynamicText);
 
-// Initial call
 updateDynamicText();
+
+// Output Action Toggle (Preview vs Download)
+const actionToggle = document.getElementById("action-toggle");
+const labelPreview = document.getElementById("label-preview");
+const labelDownload = document.getElementById("label-download");
+actionToggle.addEventListener("change", (e) => {
+  if (e.target.checked) {
+    labelDownload.classList.add("active");
+    labelPreview.classList.remove("active");
+  } else {
+    labelPreview.classList.add("active");
+    labelDownload.classList.remove("active");
+  }
+});
+
+// Modal Logic
+const previewModal = document.getElementById("preview-modal");
+const previewIframe = document.getElementById("preview-iframe");
+const btnModalClose = document.getElementById("btn-modal-close");
+const btnModalDownload = document.getElementById("btn-modal-download");
+const previewTitle = document.getElementById("preview-title");
+
+let currentBlobUrl = null;
+let currentFileName = "";
+
+btnModalClose.addEventListener("click", () => {
+  previewModal.classList.remove("open");
+  setTimeout(() => (previewIframe.src = ""), 300); // Clear iframe to free memory
+});
+
+btnModalDownload.addEventListener("click", () => {
+  if (currentBlobUrl) {
+    const a = document.createElement("a");
+    a.href = currentBlobUrl;
+    a.download = currentFileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
+});
 
 // --- DRAG AND DROP SETUP ---
 ["dragenter", "dragover", "dragleave", "drop"].forEach((eventName) => {
@@ -161,13 +196,14 @@ function setupDropZone(zoneId, config) {
   );
 }
 
-// Init all 6 Zones
+// Init all 7 Zones
 setupDropZone("zone-bc-exact", { type: "bc", hasBleed: false });
 setupDropZone("zone-bc-bleed", { type: "bc", hasBleed: true });
 setupDropZone("zone-auto-exact", { type: "auto", hasBleed: false });
 setupDropZone("zone-auto-bleed", { type: "auto", hasBleed: true });
 setupDropZone("zone-cut-stack-exact", { type: "cutstack", hasBleed: false });
 setupDropZone("zone-cut-stack-bleed", { type: "cutstack", hasBleed: true });
+setupDropZone("zone-booklet", { type: "booklet", hasBleed: true }); // NEW ZONE
 
 function mmToPt(mm) {
   return (mm * 72) / 25.4;
@@ -211,7 +247,7 @@ async function processAndExportPDF(filesArray, config, dropZoneElement) {
 
   const originalText = dropZoneElement.innerHTML;
   dropZoneElement.classList.remove("error");
-  dropZoneElement.innerHTML = `<strong style="color:var(--text-main)">Processing...</strong><span style="color:var(--accent-primary)">Validating Matrix</span>`;
+  dropZoneElement.innerHTML = `<strong style="color:var(--text-main)">Processing...</strong><span style="color:var(--accent-primary)">Validating Data</span>`;
 
   try {
     const newPdf = await PDFLib.PDFDocument.create();
@@ -253,18 +289,6 @@ async function processAndExportPDF(filesArray, config, dropZoneElement) {
       if (i === 0) {
         artWMm = currentWMm;
         artHMm = currentHMm;
-        if (config.type === "bc") {
-          const expectedW = config.hasBleed ? 90 + userBleed * 2 : 90;
-          const expectedH = config.hasBleed ? 50 + userBleed * 2 : 50;
-          if (
-            Math.abs(artWMm - expectedW) > 1.5 ||
-            Math.abs(artHMm - expectedH) > 1.5
-          ) {
-            throw new Error(
-              `Size Error: Expected ${expectedW}x${expectedH}mm.`,
-            );
-          }
-        }
       } else {
         if (
           Math.abs(currentWMm - artWMm) > 1.5 ||
@@ -281,7 +305,7 @@ async function processAndExportPDF(filesArray, config, dropZoneElement) {
     const sheetLongMm = SHEET_DIMENSIONS[sheetSelection].long;
     const sheetShortMm = SHEET_DIMENSIONS[sheetSelection].short;
 
-    const gutterMm = config.hasBleed ? userGutter : 0;
+    let gutterMm = config.hasBleed ? userGutter : 0;
     const cutWMm = config.hasBleed ? artWMm - userBleed * 2 : artWMm;
     const cutHMm = config.hasBleed ? artHMm - userBleed * 2 : artHMm;
 
@@ -291,31 +315,45 @@ async function processAndExportPDF(filesArray, config, dropZoneElement) {
 
     let cols, rows, useLandscape;
 
-    const colsL = Math.floor((maxUsableLong + gutterMm) / (cutWMm + gutterMm));
-    const rowsL = Math.floor((maxUsableShort + gutterMm) / (cutHMm + gutterMm));
-    const colsP = Math.floor((maxUsableShort + gutterMm) / (cutWMm + gutterMm));
-    const rowsP = Math.floor((maxUsableLong + gutterMm) / (cutHMm + gutterMm));
-
-    // Force Orientation Logic overrides default behavior
-    if (orientSelection === "landscape") {
+    if (config.type === "booklet") {
+      // NEW: BOOKLET OVERRIDES
       useLandscape = true;
-      cols = colsL;
-      rows = rowsL;
-    } else if (orientSelection === "portrait") {
-      useLandscape = false;
-      cols = colsP;
-      rows = rowsP;
+      cols = 2;
+      rows = 1;
+      gutterMm = 0; // Booklets have 0 gutter on the spine fold
+      if (cutWMm * 2 > maxUsableLong || cutHMm > maxUsableShort)
+        throw new Error(`Spread too large for ${sheetSelection}`);
     } else {
-      // Auto
-      useLandscape = colsL * rowsL >= colsP * rowsP;
-      cols = useLandscape ? colsL : colsP;
-      rows = useLandscape ? rowsL : rowsP;
-    }
-
-    if (cols === 0 || rows === 0)
-      throw new Error(
-        `Artwork too large for ${sheetSelection} (${orientSelection})`,
+      const colsL = Math.floor(
+        (maxUsableLong + gutterMm) / (cutWMm + gutterMm),
       );
+      const rowsL = Math.floor(
+        (maxUsableShort + gutterMm) / (cutHMm + gutterMm),
+      );
+      const colsP = Math.floor(
+        (maxUsableShort + gutterMm) / (cutWMm + gutterMm),
+      );
+      const rowsP = Math.floor(
+        (maxUsableLong + gutterMm) / (cutHMm + gutterMm),
+      );
+
+      if (orientSelection === "landscape") {
+        useLandscape = true;
+        cols = colsL;
+        rows = rowsL;
+      } else if (orientSelection === "portrait") {
+        useLandscape = false;
+        cols = colsP;
+        rows = rowsP;
+      } else {
+        useLandscape = colsL * rowsL >= colsP * rowsP;
+        cols = useLandscape ? colsL : colsP;
+        rows = useLandscape ? rowsL : rowsP;
+      }
+
+      if (cols === 0 || rows === 0)
+        throw new Error(`Artwork too large for ${sheetSelection}`);
+    }
 
     const pageW = useLandscape ? mmToPt(sheetLongMm) : mmToPt(sheetShortMm);
     const pageH = useLandscape ? mmToPt(sheetShortMm) : mmToPt(sheetLongMm);
@@ -441,7 +479,70 @@ async function processAndExportPDF(filesArray, config, dropZoneElement) {
 
     // --- 3. BUILD THE PDF MATRIX ---
 
-    if (config.type === "cutstack") {
+    if (config.type === "booklet") {
+      // --- NEW: BOOKLET (PRINTER'S SPREADS) LOGIC ---
+      // 1. Pad array with blanks until it's a multiple of 4
+      while (allElements.length % 4 !== 0) {
+        allElements.push(null);
+      }
+
+      const totalPages = allElements.length;
+      const sheets = totalPages / 4;
+
+      for (let s = 0; s < sheets; s++) {
+        const frontSheet = newPdf.addPage([pageW, pageH]);
+        const backSheet = newPdf.addPage([pageW, pageH]);
+
+        // Mathematically calculate the pairs
+        const fLeft = allElements[totalPages - 1 - s * 2];
+        const fRight = allElements[s * 2];
+        const bLeft = allElements[s * 2 + 1];
+        const bRight = allElements[totalPages - 2 - s * 2];
+
+        // Front Spread (Left col = 0, Right col = 1)
+        if (fLeft)
+          stampElement(
+            frontSheet,
+            fLeft,
+            startX - offset,
+            startY - offset,
+            drawW,
+            drawH,
+          );
+        if (fRight)
+          stampElement(
+            frontSheet,
+            fRight,
+            startX + cutW - offset,
+            startY - offset,
+            drawW,
+            drawH,
+          );
+
+        // Back Spread
+        if (bLeft)
+          stampElement(
+            backSheet,
+            bLeft,
+            startX - offset,
+            startY - offset,
+            drawW,
+            drawH,
+          );
+        if (bRight)
+          stampElement(
+            backSheet,
+            bRight,
+            startX + cutW - offset,
+            startY - offset,
+            drawW,
+            drawH,
+          );
+
+        drawCropMarksAndSlug(frontSheet);
+        drawCropMarksAndSlug(backSheet);
+      }
+    } else if (config.type === "cutstack") {
       if (isDuplexMode) {
         let pairs = [];
         for (let i = 0; i < allElements.length; i += 2)
@@ -454,12 +555,10 @@ async function processAndExportPDF(filesArray, config, dropZoneElement) {
         for (let s = 0; s < sheetsNeeded; s++) {
           const frontSheet = newPdf.addPage([pageW, pageH]);
           const backSheet = newPdf.addPage([pageW, pageH]);
-
           for (let r = 0; r < rows; r++) {
             for (let c = 0; c < cols; c++) {
               let slotIdx = r * cols + c;
               let pairIdx = slotIdx * sheetsNeeded + s;
-
               if (pairIdx < pairs.length) {
                 const pair = pairs[pairIdx];
                 stampElement(
@@ -470,7 +569,6 @@ async function processAndExportPDF(filesArray, config, dropZoneElement) {
                   drawW,
                   drawH,
                 );
-
                 if (pair.back) {
                   const mirroredC = cols - 1 - c;
                   stampElement(
@@ -597,7 +695,7 @@ async function processAndExportPDF(filesArray, config, dropZoneElement) {
       }
     }
 
-    // 4. EXPORT
+    // 4. EXPORT OR PREVIEW
     const pdfBytes = await newPdf.save();
 
     const baseName =
@@ -606,24 +704,39 @@ async function processAndExportPDF(filesArray, config, dropZoneElement) {
         : filesArray[0].name.replace(/\.[^/.]+$/, "");
     let printType = config.type === "bc" ? "BC" : "AutoFit";
     if (config.type === "cutstack") printType = "CutStack";
+    if (config.type === "booklet") printType = "Booklet";
 
     const suffix = config.hasBleed ? "bleed" : "exact";
     const modeLabel = isNestingMode ? "Nested" : "Cloned";
     const plexLabel = isDuplexMode ? "Duplex" : "Simplex";
 
-    const newFileName = `${baseName}_${sheetSelection}_${printType}_${cols}x${rows}_${modeLabel}_${plexLabel}_${suffix}.pdf`;
+    let newFileName = `${baseName}_${sheetSelection}_${printType}_${cols}x${rows}_${modeLabel}_${plexLabel}_${suffix}.pdf`;
+    if (config.type === "booklet") {
+      newFileName = `${baseName}_${sheetSelection}_Booklet_Spreads_${suffix}.pdf`;
+    }
 
     const blob = new Blob([pdfBytes], { type: "application/pdf" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = newFileName;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
 
-    dropZoneElement.innerHTML = `<strong style="color:var(--text-main)">Complete!</strong><span style="color:var(--accent-primary)">Output secured.</span>`;
+    if (actionToggle.checked) {
+      // DOWNLOAD MODE
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = newFileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000); // cleanup
+    } else {
+      // PREVIEW MODE
+      currentBlobUrl = url;
+      currentFileName = newFileName;
+      previewTitle.innerText = newFileName;
+      previewIframe.src = url;
+      previewModal.classList.add("open");
+    }
+
+    dropZoneElement.innerHTML = `<strong style="color:var(--text-main)">Complete!</strong><span style="color:var(--accent-primary)">Output ready.</span>`;
     setTimeout(() => (dropZoneElement.innerHTML = originalText), 4000);
   } catch (error) {
     console.error("Matrix Error:", error);
