@@ -7,17 +7,18 @@ function ptToMm(pt) {
   return (pt * 25.4) / 72;
 }
 
-const stampElement = (targetPage, element, xPos, yPos, w, h) => {
-  if (element.type === "page")
-    targetPage.drawPage(element.obj, { x: xPos, y: yPos, width: w, height: h });
-  else if (element.type === "image")
-    targetPage.drawImage(element.obj, {
-      x: xPos,
-      y: yPos,
-      width: w,
-      height: h,
-    });
-};
+function hexToRgb(hex) {
+  hex = hex.replace(/^#/, "");
+  if (hex.length === 3)
+    hex = hex
+      .split("")
+      .map((c) => c + c)
+      .join("");
+  const r = parseInt(hex.slice(0, 2), 16) / 255;
+  const g = parseInt(hex.slice(2, 4), 16) / 255;
+  const b = parseInt(hex.slice(4, 6), 16) / 255;
+  return PDFLib.rgb(r, g, b);
+}
 
 const SHEET_DIMENSIONS = {
   SRA3: { long: 450, short: 320 },
@@ -31,18 +32,54 @@ self.onmessage = async (e) => {
 
   try {
     const newPdf = await PDFLib.PDFDocument.create();
-    const helveticaFont = await newPdf.embedFont(
-      PDFLib.StandardFonts.Helvetica,
-    );
+
+    let targetFontEnum = PDFLib.StandardFonts.HelveticaBold;
+    if (params.vdpFontFamily === "Helvetica")
+      targetFontEnum = PDFLib.StandardFonts.Helvetica;
+    if (params.vdpFontFamily === "TimesRomanBold")
+      targetFontEnum = PDFLib.StandardFonts.TimesRomanBold;
+    if (params.vdpFontFamily === "CourierBold")
+      targetFontEnum = PDFLib.StandardFonts.CourierBold;
+    const vdpFont = await newPdf.embedFont(targetFontEnum);
+
+    const vdpColor = hexToRgb(params.vdpFontColor || "#000000");
+    const slugFont = await newPdf.embedFont(PDFLib.StandardFonts.Helvetica);
+
+    const stampElement = (targetPage, element, xPos, yPos, w, h) => {
+      if (!element) return;
+      if (element.type === "page")
+        targetPage.drawPage(element.obj, {
+          x: xPos,
+          y: yPos,
+          width: w,
+          height: h,
+        });
+      else if (element.type === "image")
+        targetPage.drawImage(element.obj, {
+          x: xPos,
+          y: yPos,
+          width: w,
+          height: h,
+        });
+
+      if (element.vdpText) {
+        const textX = xPos + mmToPt(params.vdpX);
+        const textY = yPos + mmToPt(params.vdpY);
+        targetPage.drawText(element.vdpText, {
+          x: textX,
+          y: textY,
+          size: params.vdpFontSize,
+          font: vdpFont,
+          color: vdpColor,
+        });
+      }
+    };
 
     let allElements = [];
     let artWMm = 0,
       artHMm = 0;
-
-    // NEW: Variables to trap the raw physical size
     let originalWMm = 0,
       originalHMm = 0;
-
     let type = "auto";
     let hasBleed = true;
 
@@ -58,7 +95,7 @@ self.onmessage = async (e) => {
       percent: 5,
     });
 
-    // --- PHASE 1: EXTRACTION ---
+    // --- PHASE 1: EXTRACTION & VDP MULTIPLICATION ---
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       let currentWMm, currentHMm;
@@ -67,10 +104,26 @@ self.onmessage = async (e) => {
       if (file.type === "application/pdf") {
         const originalPdf = await PDFLib.PDFDocument.load(file.buffer);
         const firstPage = originalPdf.getPages()[0];
-        const { width, height } = firstPage.getSize();
-        currentWMm = Math.round(ptToMm(width) * 10) / 10;
-        currentHMm = Math.round(ptToMm(height) * 10) / 10;
+        const mediaBox = firstPage.getMediaBox();
+        const trimBox = firstPage.getTrimBox() || mediaBox;
+        const bleedBox = firstPage.getBleedBox() || mediaBox;
 
+        const trimWMm = Math.round(ptToMm(trimBox.width) * 10) / 10;
+        const trimHMm = Math.round(ptToMm(trimBox.height) * 10) / 10;
+        const bleedWMm = Math.round(ptToMm(bleedBox.width) * 10) / 10;
+        const detectedBleedMargin = Math.round((bleedWMm - trimWMm) / 2);
+
+        if (i === 0) {
+          self.postMessage({
+            type: "boxDetection",
+            trimW: trimWMm,
+            trimH: trimHMm,
+            bleedMargin: detectedBleedMargin,
+          });
+        }
+
+        currentWMm = trimWMm + detectedBleedMargin * 2;
+        currentHMm = trimHMm + detectedBleedMargin * 2;
         const pageIndices = originalPdf.getPageIndices();
         const embeddedPages = await newPdf.embedPdf(originalPdf, pageIndices);
         extractedItems = embeddedPages.map((p) => ({ type: "page", obj: p }));
@@ -79,17 +132,14 @@ self.onmessage = async (e) => {
         if (file.type === "image/jpeg")
           img = await newPdf.embedJpg(file.buffer);
         else img = await newPdf.embedPng(file.buffer);
-
         currentWMm = Math.round((img.width / 300) * 25.4 * 10) / 10;
         currentHMm = Math.round((img.height / 300) * 25.4 * 10) / 10;
         extractedItems = [{ type: "image", obj: img }];
       }
 
       if (i === 0) {
-        // Trap the raw dimensions of the very first file to send back to the UI!
         originalWMm = currentWMm;
         originalHMm = currentHMm;
-
         if (params.forceScale) {
           if (type === "bc") {
             artWMm = hasBleed ? 90 + params.userBleed * 2 : 90;
@@ -119,6 +169,7 @@ self.onmessage = async (e) => {
       } else {
         if (
           !params.forceScale &&
+          !params.vdpActive &&
           (Math.abs(currentWMm - artWMm) > 1.5 ||
             Math.abs(currentHMm - artHMm) > 1.5)
         ) {
@@ -127,7 +178,28 @@ self.onmessage = async (e) => {
           );
         }
       }
-      allElements.push(...extractedItems);
+
+      if (params.vdpActive && type === "cutstack" && i === 0) {
+        const frontItem = extractedItems[0];
+        const backItem = extractedItems.length > 1 ? extractedItems[1] : null;
+        for (let n = params.vdpStart; n <= params.vdpEnd; n++) {
+          let numStr = String(n).padStart(params.vdpPad, "0");
+          let injectedText = params.vdpPrefix + numStr;
+          allElements.push({
+            type: frontItem.type,
+            obj: frontItem.obj,
+            vdpText: injectedText,
+          });
+          if (params.isDuplexMode) {
+            if (backItem)
+              allElements.push({ type: backItem.type, obj: backItem.obj });
+            else allElements.push(null);
+          }
+        }
+        break;
+      } else {
+        allElements.push(...extractedItems);
+      }
       self.postMessage({
         type: "progress",
         title: "Extracting Pages...",
@@ -136,7 +208,6 @@ self.onmessage = async (e) => {
       });
     }
 
-    // NEW: Fire the trapped metrics back to the UI thread!
     self.postMessage({
       type: "fileInfo",
       w: originalWMm,
@@ -147,7 +218,6 @@ self.onmessage = async (e) => {
     // --- PHASE 2: CALCULATE TARGET GEOMETRY ---
     const sheetLongMm = SHEET_DIMENSIONS[params.sheetSelection].long;
     const sheetShortMm = SHEET_DIMENSIONS[params.sheetSelection].short;
-
     let gutterMm = hasBleed ? params.userGutter : 0;
     const cutWMm = hasBleed ? artWMm - params.userBleed * 2 : artWMm;
     const cutHMm = hasBleed ? artHMm - params.userBleed * 2 : artHMm;
@@ -155,7 +225,6 @@ self.onmessage = async (e) => {
     const reserveMargin = (params.userCropLen + params.userCropGap + 2) * 2;
     const maxUsableLong = sheetLongMm - reserveMargin;
     const maxUsableShort = sheetShortMm - reserveMargin;
-
     let cols, rows, useLandscape;
 
     if (type === "booklet") {
@@ -180,7 +249,6 @@ self.onmessage = async (e) => {
       const rowsP = Math.floor(
         (maxUsableLong + gutterMm) / (cutHMm + gutterMm),
       );
-
       if (params.orientSelection === "landscape") {
         useLandscape = true;
         cols = colsL;
@@ -194,7 +262,6 @@ self.onmessage = async (e) => {
           useLandscape = true;
         else if (type === "bc") useLandscape = false;
         else useLandscape = colsL * rowsL >= colsP * rowsP;
-
         cols = useLandscape ? colsL : colsP;
         rows = useLandscape ? rowsL : rowsP;
       }
@@ -223,94 +290,98 @@ self.onmessage = async (e) => {
     const markColor = PDFLib.rgb(0, 0, 0);
     const markThickness = 0.5;
 
+    // UPGRADED STAMP LAYOUT HANDLER
     const drawCropMarksAndSlug = (page) => {
-      if (hasBleed) {
-        for (let c = 0; c < cols; c++) {
-          const xLeft = startX + c * (cutW + gutter);
-          const xRight = xLeft + cutW;
-          page.drawLine({
-            start: { x: xLeft, y: startY - cropGap },
-            end: { x: xLeft, y: startY - cropGap - cropLen },
-            thickness: markThickness,
-            color: markColor,
-          });
-          page.drawLine({
-            start: { x: xRight, y: startY - cropGap },
-            end: { x: xRight, y: startY - cropGap - cropLen },
-            thickness: markThickness,
-            color: markColor,
-          });
-          page.drawLine({
-            start: { x: xLeft, y: startY + gridTotalH + cropGap },
-            end: { x: xLeft, y: startY + gridTotalH + cropGap + cropLen },
-            thickness: markThickness,
-            color: markColor,
-          });
-          page.drawLine({
-            start: { x: xRight, y: startY + gridTotalH + cropGap },
-            end: { x: xRight, y: startY + gridTotalH + cropGap + cropLen },
-            thickness: markThickness,
-            color: markColor,
-          });
-        }
-        for (let r = 0; r < rows; r++) {
-          const yBottom = startY + r * (cutH + gutter);
-          const yTop = yBottom + cutH;
-          page.drawLine({
-            start: { x: startX - cropGap, y: yBottom },
-            end: { x: startX - cropGap - cropLen, y: yBottom },
-            thickness: markThickness,
-            color: markColor,
-          });
-          page.drawLine({
-            start: { x: startX - cropGap, y: yTop },
-            end: { x: startX - cropGap - cropLen, y: yTop },
-            thickness: markThickness,
-            color: markColor,
-          });
-          page.drawLine({
-            start: { x: startX + gridTotalW + cropGap, y: yBottom },
-            end: { x: startX + gridTotalW + cropGap + cropLen, y: yBottom },
-            thickness: markThickness,
-            color: markColor,
-          });
-          page.drawLine({
-            start: { x: startX + gridTotalW + cropGap, y: yTop },
-            end: { x: startX + gridTotalW + cropGap + cropLen, y: yTop },
-            thickness: markThickness,
-            color: markColor,
-          });
-        }
-      } else {
-        for (let c = 0; c <= cols; c++) {
-          const x = startX + c * cutW;
-          page.drawLine({
-            start: { x: x, y: startY - cropGap },
-            end: { x: x, y: startY - cropGap - cropLen },
-            thickness: markThickness,
-            color: markColor,
-          });
-          page.drawLine({
-            start: { x: x, y: startY + gridTotalH + cropGap },
-            end: { x: x, y: startY + gridTotalH + cropGap + cropLen },
-            thickness: markThickness,
-            color: markColor,
-          });
-        }
-        for (let r = 0; r <= rows; r++) {
-          const y = startY + r * cutH;
-          page.drawLine({
-            start: { x: startX - cropGap, y: y },
-            end: { x: startX - cropGap - cropLen, y: y },
-            thickness: markThickness,
-            color: markColor,
-          });
-          page.drawLine({
-            start: { x: startX + gridTotalW + cropGap, y: y },
-            end: { x: startX + gridTotalW + cropGap + cropLen, y: y },
-            thickness: markThickness,
-            color: markColor,
-          });
+      if (params.addCropMarks) {
+        // <-- CONTEXT RE-CHECK INJECTED HERE
+        if (hasBleed) {
+          for (let c = 0; c < cols; c++) {
+            const xLeft = startX + c * (cutW + gutter);
+            const xRight = xLeft + cutW;
+            page.drawLine({
+              start: { x: xLeft, y: startY - cropGap },
+              end: { x: xLeft, y: startY - cropGap - cropLen },
+              thickness: markThickness,
+              color: markColor,
+            });
+            page.drawLine({
+              start: { x: xRight, y: startY - cropGap },
+              end: { x: xRight, y: startY - cropGap - cropLen },
+              thickness: markThickness,
+              color: markColor,
+            });
+            page.drawLine({
+              start: { x: xLeft, y: startY + gridTotalH + cropGap },
+              end: { x: xLeft, y: startY + gridTotalH + cropGap + cropLen },
+              thickness: markThickness,
+              color: markColor,
+            });
+            page.drawLine({
+              start: { x: xRight, y: startY + gridTotalH + cropGap },
+              end: { x: xRight, y: startY + gridTotalH + cropGap + cropLen },
+              thickness: markThickness,
+              color: markColor,
+            });
+          }
+          for (let r = 0; r < rows; r++) {
+            const yBottom = startY + r * (cutH + gutter);
+            const yTop = yBottom + cutH;
+            page.drawLine({
+              start: { x: startX - cropGap, y: yBottom },
+              end: { x: startX - cropGap - cropLen, y: yBottom },
+              thickness: markThickness,
+              color: markColor,
+            });
+            page.drawLine({
+              start: { x: startX - cropGap, y: yTop },
+              end: { x: startX - cropGap - cropLen, y: yTop },
+              thickness: markThickness,
+              color: markColor,
+            });
+            page.drawLine({
+              start: { x: startX + gridTotalW + cropGap, y: yBottom },
+              end: { x: startX + gridTotalW + cropGap + cropLen, y: yBottom },
+              thickness: markThickness,
+              color: markColor,
+            });
+            page.drawLine({
+              start: { x: startX + gridTotalW + cropGap, y: yTop },
+              end: { x: startX + gridTotalW + cropGap + cropLen, y: yTop },
+              thickness: markThickness,
+              color: markColor,
+            });
+          }
+        } else {
+          for (let c = 0; c <= cols; c++) {
+            const x = startX + c * cutW;
+            page.drawLine({
+              start: { x: x, y: startY - cropGap },
+              end: { x: x, y: startY - cropGap - cropLen },
+              thickness: markThickness,
+              color: markColor,
+            });
+            page.drawLine({
+              start: { x: x, y: startY + gridTotalH + cropGap },
+              end: { x: x, y: startY + gridTotalH + cropGap + cropLen },
+              thickness: markThickness,
+              color: markColor,
+            });
+          }
+          for (let r = 0; r <= rows; r++) {
+            const y = startY + r * cutH;
+            page.drawLine({
+              start: { x: startX - cropGap, y: y },
+              end: { x: startX - cropGap - cropLen, y: y },
+              thickness: markThickness,
+              color: markColor,
+            });
+            page.drawLine({
+              start: { x: startX + gridTotalW + cropGap, y: y },
+              end: { x: startX + gridTotalW + cropGap + cropLen, y: y },
+              thickness: markThickness,
+              color: markColor,
+            });
+          }
         }
       }
       if (params.addSlug) {
@@ -318,7 +389,7 @@ self.onmessage = async (e) => {
           x: startX + 3,
           y: startY + gridTotalH + cropGap + 1,
           size: 4,
-          font: helveticaFont,
+          font: slugFont,
           color: markColor,
         });
       }
@@ -339,17 +410,14 @@ self.onmessage = async (e) => {
       while (allElements.length % 4 !== 0) allElements.push(null);
       const totalPages = allElements.length;
       const sheets = totalPages / 4;
-
       for (let s = 0; s < sheets; s++) {
         reportProgress(s + 1, sheets, "Spreads");
         const frontSheet = newPdf.addPage([pageW, pageH]);
         const backSheet = newPdf.addPage([pageW, pageH]);
-
         const fLeft = allElements[totalPages - 1 - s * 2];
         const fRight = allElements[s * 2];
         const bLeft = allElements[s * 2 + 1];
         const bRight = allElements[totalPages - 2 - s * 2];
-
         if (fLeft)
           stampElement(
             frontSheet,
@@ -386,7 +454,6 @@ self.onmessage = async (e) => {
             drawW,
             drawH,
           );
-
         drawCropMarksAndSlug(frontSheet);
         drawCropMarksAndSlug(backSheet);
       }
@@ -399,7 +466,6 @@ self.onmessage = async (e) => {
             back: allElements[i + 1] || null,
           });
         const sheetsNeeded = Math.ceil(pairs.length / totalSlots);
-
         for (let s = 0; s < sheetsNeeded; s++) {
           reportProgress(s + 1, sheetsNeeded, "Sheets");
           const frontSheet = newPdf.addPage([pageW, pageH]);
@@ -470,7 +536,6 @@ self.onmessage = async (e) => {
         let currentPairIdx = 0;
         let sheetCount = 0;
         const totalEstimatedSheets = Math.ceil(pairs.length / totalSlots);
-
         while (currentPairIdx < pairs.length) {
           sheetCount++;
           reportProgress(sheetCount, totalEstimatedSheets, "Sheets");
@@ -510,7 +575,6 @@ self.onmessage = async (e) => {
         let currentPageIdx = 0;
         let sheetCount = 0;
         const totalEstimatedSheets = Math.ceil(allElements.length / totalSlots);
-
         while (currentPageIdx < allElements.length) {
           sheetCount++;
           reportProgress(sheetCount, totalEstimatedSheets, "Sheets");
@@ -534,7 +598,6 @@ self.onmessage = async (e) => {
         }
       }
     } else {
-      // CLONE MODE
       let sheetCount = 0;
       for (const element of allElements) {
         sheetCount++;
@@ -570,7 +633,6 @@ self.onmessage = async (e) => {
         ? "GangRun_Batch"
         : files[0].name.replace(/\.[^/.]+$/, "");
     let exportPrintName = type.toUpperCase();
-
     const suffixLabel = hasBleed ? "bleed" : "exact";
     const modeLabel = params.isNestingMode ? "Nested" : "Cloned";
     const plexLabel = params.isDuplexMode ? "Duplex" : "Simplex";

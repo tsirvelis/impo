@@ -31,6 +31,11 @@ const slugToggle = document.getElementById("slug-toggle");
 const labelSlugOff = document.getElementById("label-slug-off");
 const labelSlugOn = document.getElementById("label-slug-on");
 
+// NEW: Crop Mark elements
+const cropsToggle = document.getElementById("crops-toggle");
+const labelCropsOff = document.getElementById("label-crops-off");
+const labelCropsOn = document.getElementById("label-crops-on");
+
 const scaleToggle = document.getElementById("scale-toggle");
 const labelScaleOff = document.getElementById("label-scale-off");
 const labelScaleOn = document.getElementById("label-scale-on");
@@ -56,11 +61,51 @@ const valGutter = document.getElementById("val-gutter");
 const valCropLen = document.getElementById("val-crop-len");
 const valCropGap = document.getElementById("val-crop-gap");
 
-// NEW: Info Elements
 const infoOriginalSize = document.getElementById("info-original-size");
 const infoPageCount = document.getElementById("info-page-count");
 
+const vdpPanelContainer = document.getElementById("vdp-panel-container");
+const vdpInputs = document.getElementById("vdp-inputs");
+const vdpToggle = document.getElementById("vdp-toggle");
+const labelVdpOff = document.getElementById("label-vdp-off");
+const labelVdpOn = document.getElementById("label-vdp-on");
+const inputVdpStart = document.getElementById("input-vdp-start");
+const inputVdpEnd = document.getElementById("input-vdp-end");
+const inputVdpPrefix = document.getElementById("input-vdp-prefix");
+const inputVdpPad = document.getElementById("input-vdp-pad");
+const inputVdpX = document.getElementById("input-vdp-x");
+const inputVdpY = document.getElementById("input-vdp-y");
+const sliderVdpFont = document.getElementById("slider-vdp-font");
+const valVdpFont = document.getElementById("val-vdp-font");
+
+const selectVdpFont = document.getElementById("select-vdp-font");
+const inputVdpColor = document.getElementById("input-vdp-color");
+
 // --- UI EVENT LISTENERS ---
+impositionProfileSelect.addEventListener("change", (e) => {
+  if (e.target.value.includes("cutstack")) {
+    vdpPanelContainer.style.display = "block";
+  } else {
+    vdpPanelContainer.style.display = "none";
+    vdpToggle.checked = false;
+    vdpInputs.style.display = "none";
+    labelVdpOff.classList.add("active");
+    labelVdpOn.classList.remove("active");
+  }
+});
+
+vdpToggle.addEventListener("change", (e) => {
+  if (e.target.checked) {
+    labelVdpOn.classList.add("active");
+    labelVdpOff.classList.remove("active");
+    vdpInputs.style.display = "grid";
+  } else {
+    labelVdpOff.classList.add("active");
+    labelVdpOn.classList.remove("active");
+    vdpInputs.style.display = "none";
+  }
+});
+
 modeToggle.addEventListener("change", (e) => {
   if (e.target.checked) {
     labelNest.classList.add("active");
@@ -88,6 +133,18 @@ slugToggle.addEventListener("change", (e) => {
     labelSlugOn.classList.remove("active");
   }
 });
+
+// Crop marks toggle UI interaction
+cropsToggle.addEventListener("change", (e) => {
+  if (e.target.checked) {
+    labelCropsOn.classList.add("active");
+    labelCropsOff.classList.remove("active");
+  } else {
+    labelCropsOff.classList.add("active");
+    labelCropsOn.classList.remove("active");
+  }
+});
+
 scaleToggle.addEventListener("change", (e) => {
   if (e.target.checked) {
     labelScaleOn.classList.add("active");
@@ -142,11 +199,13 @@ function updateSliderText() {
   valGutter.innerText = sliderGutter.value + " mm";
   valCropLen.innerText = sliderCropLen.value + " mm";
   valCropGap.innerText = sliderCropGap.value + " mm";
+  valVdpFont.innerText = sliderVdpFont.value + " pt";
 }
 sliderBleed.addEventListener("input", updateSliderText);
 sliderGutter.addEventListener("input", updateSliderText);
 sliderCropLen.addEventListener("input", updateSliderText);
 sliderCropGap.addEventListener("input", updateSliderText);
+sliderVdpFont.addEventListener("input", updateSliderText);
 updateSliderText();
 
 // --- WORKSPACE MATRIX STATE ---
@@ -193,6 +252,7 @@ const autoTriggerElements = [
   modeToggle,
   duplexToggle,
   slugToggle,
+  cropsToggle,
   scaleToggle,
   scaleBleedToggle,
   sliderBleed,
@@ -201,6 +261,16 @@ const autoTriggerElements = [
   sliderCropGap,
   inputScaleW,
   inputScaleH,
+  vdpToggle,
+  inputVdpStart,
+  inputVdpEnd,
+  inputVdpPrefix,
+  inputVdpPad,
+  inputVdpX,
+  inputVdpY,
+  sliderVdpFont,
+  selectVdpFont,
+  inputVdpColor,
 ];
 
 autoTriggerElements.forEach((el) => {
@@ -215,10 +285,8 @@ async function triggerRenderEngine() {
   progressTitle.innerText = "Re-calculating Matrix...";
   progressDetail.innerText = "Applying configuration parameter state";
   progressBar.style.width = "0%";
-
   infoOriginalSize.innerText = "Analyzing...";
   infoPageCount.innerText = "--";
-
   progressOverlay.classList.add("open");
 
   const filePayload = [];
@@ -234,6 +302,7 @@ async function triggerRenderEngine() {
     isNestingMode: modeToggle.checked,
     isDuplexMode: duplexToggle.checked,
     addSlug: slugToggle.checked,
+    addCropMarks: cropsToggle.checked, // <-- NEW PARAMETER PASSED TO WORKER
     forceScale: scaleToggle.checked,
     scaleIncludesBleed: scaleBleedToggle.checked,
     userBleed: parseFloat(sliderBleed.value),
@@ -242,6 +311,16 @@ async function triggerRenderEngine() {
     userCropGap: parseFloat(sliderCropGap.value),
     targetW: parseFloat(inputScaleW.value),
     targetH: parseFloat(inputScaleH.value),
+    vdpActive: vdpToggle.checked,
+    vdpStart: parseInt(inputVdpStart.value),
+    vdpEnd: parseInt(inputVdpEnd.value),
+    vdpPrefix: inputVdpPrefix.value,
+    vdpPad: parseInt(inputVdpPad.value),
+    vdpX: parseFloat(inputVdpX.value),
+    vdpY: parseFloat(inputVdpY.value),
+    vdpFontSize: parseInt(sliderVdpFont.value),
+    vdpFontFamily: selectVdpFont.value,
+    vdpFontColor: inputVdpColor.value,
   };
 
   worker.postMessage({ files: filePayload, params });
@@ -255,34 +334,36 @@ worker.onmessage = (e) => {
     progressTitle.innerText = msg.title;
     progressDetail.innerText = msg.detail;
     progressBar.style.width = `${msg.percent}%`;
+  } else if (msg.type === "boxDetection") {
+    if (msg.bleedMargin > 0) {
+      sliderBleed.value = msg.bleedMargin;
+      valBleed.innerText = msg.bleedMargin + " mm";
+      scaleBleedToggle.checked = true;
+      labelSbleedOn.classList.add("active");
+      labelSbleedOff.classList.remove("active");
+      if (!scaleToggle.checked) {
+        inputScaleW.value = msg.trimW;
+        inputScaleH.value = msg.trimH;
+      }
+    }
   } else if (msg.type === "fileInfo") {
-    // 1. Update the UI Info Panel
     infoOriginalSize.innerText = `${msg.w} x ${msg.h} mm`;
     infoPageCount.innerText = msg.pages;
-
-    // 2. NEW: Pre-fill the Auto-Scale inputs with the source size!
-    // We only update them if the user hasn't already started typing a custom size
     if (!scaleToggle.checked) {
       inputScaleW.value = msg.w;
       inputScaleH.value = msg.h;
-      // Re-calculate the lock ratio based on the true source dimensions
       scaleRatio = msg.w / msg.h;
     }
   } else if (msg.type === "success") {
     progressOverlay.classList.remove("open");
-
     if (currentBlobUrl) URL.revokeObjectURL(currentBlobUrl);
-
     const blob = new Blob([msg.pdfBytes], { type: "application/pdf" });
     currentBlobUrl = URL.createObjectURL(blob);
     currentFileName = msg.fileName;
-
     previewTitle.innerText = msg.fileName;
     previewIframe.src = currentBlobUrl;
-
-    if (!previewModal.classList.contains("open")) {
+    if (!previewModal.classList.contains("open"))
       previewModal.classList.add("open");
-    }
   } else if (msg.type === "error") {
     progressOverlay.classList.remove("open");
     alert("Matrix Processing Aborted: " + msg.message);
@@ -300,7 +381,6 @@ worker.onmessage = (e) => {
     false,
   );
 });
-
 const zoneUniversal = document.getElementById("zone-universal");
 ["dragenter", "dragover"].forEach((eventName) =>
   zoneUniversal.addEventListener(
@@ -330,7 +410,7 @@ zoneUniversal.addEventListener(
       currentFiles = files;
       triggerRenderEngine();
     } else {
-      alert("Please drop valid PDF, JPG, or PNG architectural formats.");
+      alert("Please drop valid PDF, JPG, or PNG formats.");
     }
   },
   false,

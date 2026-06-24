@@ -45,7 +45,6 @@ body {
     color 0.4s ease;
 }
 
-/* Top Navigation Bar */
 .top-bar {
   width: 100%;
   max-width: 1000px;
@@ -72,7 +71,6 @@ body {
   filter: drop-shadow(0 0 8px rgba(59, 130, 246, 0.3));
 }
 
-/* Theme Toggle */
 .theme-switch-wrapper {
   display: flex;
   align-items: center;
@@ -117,7 +115,6 @@ input:checked + .theme-slider:before {
   transform: translateX(20px);
 }
 
-/* Headers */
 .header-titles {
   text-align: center;
   margin-bottom: 40px;
@@ -135,7 +132,6 @@ p.subtitle {
   margin: 0;
 }
 
-/* The Master Universal Drop Zone */
 .app-container {
   width: 100%;
   max-width: 760px;
@@ -174,7 +170,6 @@ p.subtitle {
   background: rgba(239, 68, 68, 0.03) !important;
   color: var(--accent-danger);
 }
-
 .upload-icon {
   color: var(--text-muted);
   margin-bottom: 20px;
@@ -195,7 +190,6 @@ p.subtitle {
   font-weight: 400;
 }
 
-/* --- INTERACTIVE LIVE WORKSPACE MODAL --- */
 .preview-modal {
   display: none;
   position: fixed;
@@ -264,7 +258,6 @@ p.subtitle {
   gap: 18px;
 }
 
-/* Dropdown & Form Styling */
 .dropdown-label {
   font-size: 0.8rem;
   font-weight: 600;
@@ -324,7 +317,6 @@ p.subtitle {
   font-weight: 600;
 }
 
-/* Toggles Switches */
 .switch {
   position: relative;
   display: inline-block;
@@ -363,7 +355,6 @@ input:checked + .slider:before {
   background-color: var(--accent-primary);
 }
 
-/* Range Sliders */
 .panel-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -417,17 +408,40 @@ input[type="range"]::-webkit-slider-runnable-track {
   width: 100%;
   box-sizing: border-box;
   outline: none;
+  transition: 0.2s;
 }
 .num-input:focus {
   border-color: var(--accent-primary);
 }
+
+/* Color Picker Styling */
+.color-input {
+  -webkit-appearance: none;
+  border: 1px solid var(--card-border);
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 6px;
+  height: 36px;
+  width: 100%;
+  cursor: pointer;
+  padding: 2px;
+  transition: 0.2s;
+}
+.color-input:focus {
+  border-color: var(--accent-primary);
+}
+.color-input::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+.color-input::-webkit-color-swatch {
+  border: none;
+  border-radius: 4px;
+}
+
 .divider {
   height: 1px;
   background: var(--card-border);
   margin: 10px 0;
 }
-
-/* Workspace Main Preview Elements */
 .preview-header {
   display: flex;
   justify-content: space-between;
@@ -484,7 +498,6 @@ input[type="range"]::-webkit-slider-runnable-track {
   background: #0f172a;
 }
 
-/* Source File Info Panel */
 .info-panel {
   background: rgba(0, 0, 0, 0.3);
   border: 1px solid var(--card-border);
@@ -511,7 +524,6 @@ input[type="range"]::-webkit-slider-runnable-track {
   letter-spacing: 0.5px;
 }
 
-/* Progress Box Modals */
 .progress-box {
   background: #1e293b;
   border: 1px solid var(--card-border);
