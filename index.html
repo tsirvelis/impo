@@ -371,7 +371,7 @@
                     class="num-input auto-trigger"
                   />
                 </div>
-                <div class="range-group">
+                <!-- <div class="range-group">
                   <div class="range-header"><span>Pos X (mm)</span></div>
                   <input
                     type="number"
@@ -379,6 +379,75 @@
                     value="10"
                     class="num-input auto-trigger"
                   />
+                </div> -->
+                <!-- Position 1 -->
+                <div class="range-group">
+                  <div class="range-header"><span>Pos X 1 (mm)</span></div>
+                  <input
+                    type="number"
+                    id="input-vdp-x"
+                    value="10"
+                    class="num-input auto-trigger"
+                  />
+                </div>
+                <div class="range-group">
+                  <div class="range-header"><span>Pos Y 1 (mm)</span></div>
+                  <input
+                    type="number"
+                    id="input-vdp-y"
+                    value="10"
+                    class="num-input auto-trigger"
+                  />
+                </div>
+
+                <!-- 2nd Position Toggle -->
+                <div
+                  class="toggle-row"
+                  style="
+                    grid-column: 1 / -1;
+                    margin-top: 5px;
+                    margin-bottom: 5px;
+                    font-size: 0.8rem;
+                  "
+                >
+                  <span style="font-weight: 600">Enable 2nd Position</span>
+                  <div class="mode-selector">
+                    <span id="label-vdp2-off" class="mode-label active"
+                      >Off</span
+                    >
+                    <label class="switch"
+                      ><input type="checkbox" id="vdp2-toggle" /><span
+                        class="slider"
+                      ></span
+                    ></label>
+                    <span id="label-vdp2-on" class="mode-label">On</span>
+                  </div>
+                </div>
+
+                <!-- Position 2 Inputs (Hidden by default) -->
+                <div
+                  class="panel-grid"
+                  id="vdp2-inputs"
+                  style="display: none; grid-column: 1 / -1"
+                >
+                  <div class="range-group">
+                    <div class="range-header"><span>Pos X 2 (mm)</span></div>
+                    <input
+                      type="number"
+                      id="input-vdp-x2"
+                      value="50"
+                      class="num-input auto-trigger"
+                    />
+                  </div>
+                  <div class="range-group">
+                    <div class="range-header"><span>Pos Y 2 (mm)</span></div>
+                    <input
+                      type="number"
+                      id="input-vdp-y2"
+                      value="10"
+                      class="num-input auto-trigger"
+                    />
+                  </div>
                 </div>
                 <div class="range-group">
                   <div class="range-header"><span>Pos Y (mm)</span></div>

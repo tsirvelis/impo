@@ -78,6 +78,13 @@ const inputVdpY = document.getElementById("input-vdp-y");
 const sliderVdpFont = document.getElementById("slider-vdp-font");
 const valVdpFont = document.getElementById("val-vdp-font");
 
+const vdp2Toggle = document.getElementById("vdp2-toggle");
+const labelVdp2Off = document.getElementById("label-vdp2-off");
+const labelVdp2On = document.getElementById("label-vdp2-on");
+const vdp2Inputs = document.getElementById("vdp2-inputs");
+const inputVdpX2 = document.getElementById("input-vdp-x2");
+const inputVdpY2 = document.getElementById("input-vdp-y2");
+
 const selectVdpFont = document.getElementById("select-vdp-font");
 const inputVdpColor = document.getElementById("input-vdp-color");
 
@@ -103,6 +110,18 @@ vdpToggle.addEventListener("change", (e) => {
     labelVdpOff.classList.add("active");
     labelVdpOn.classList.remove("active");
     vdpInputs.style.display = "none";
+  }
+});
+
+vdp2Toggle.addEventListener("change", (e) => {
+  if (e.target.checked) {
+    labelVdp2On.classList.add("active");
+    labelVdp2Off.classList.remove("active");
+    vdp2Inputs.style.display = "grid";
+  } else {
+    labelVdp2Off.classList.add("active");
+    labelVdp2On.classList.remove("active");
+    vdp2Inputs.style.display = "none";
   }
 });
 
@@ -268,6 +287,9 @@ const autoTriggerElements = [
   inputVdpPad,
   inputVdpX,
   inputVdpY,
+  vdp2Toggle,
+  inputVdpX2,
+  inputVdpY2,
   sliderVdpFont,
   selectVdpFont,
   inputVdpColor,
@@ -318,6 +340,9 @@ async function triggerRenderEngine() {
     vdpPad: parseInt(inputVdpPad.value),
     vdpX: parseFloat(inputVdpX.value),
     vdpY: parseFloat(inputVdpY.value),
+    vdpActive2: vdp2Toggle.checked,
+    vdpX2: parseFloat(inputVdpX2.value),
+    vdpY2: parseFloat(inputVdpY2.value),
     vdpFontSize: parseInt(sliderVdpFont.value),
     vdpFontFamily: selectVdpFont.value,
     vdpFontColor: inputVdpColor.value,

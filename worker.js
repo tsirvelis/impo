@@ -62,7 +62,19 @@ self.onmessage = async (e) => {
           height: h,
         });
 
+      // if (element.vdpText) {
+      //   const textX = xPos + mmToPt(params.vdpX);
+      //   const textY = yPos + mmToPt(params.vdpY);
+      //   targetPage.drawText(element.vdpText, {
+      //     x: textX,
+      //     y: textY,
+      //     size: params.vdpFontSize,
+      //     font: vdpFont,
+      //     color: vdpColor,
+      //   });
+      // }
       if (element.vdpText) {
+        // Draw the first ticket number
         const textX = xPos + mmToPt(params.vdpX);
         const textY = yPos + mmToPt(params.vdpY);
         targetPage.drawText(element.vdpText, {
@@ -72,6 +84,19 @@ self.onmessage = async (e) => {
           font: vdpFont,
           color: vdpColor,
         });
+
+        // Draw the second ticket number if enabled
+        if (params.vdpActive2) {
+          const textX2 = xPos + mmToPt(params.vdpX2);
+          const textY2 = yPos + mmToPt(params.vdpY2);
+          targetPage.drawText(element.vdpText, {
+            x: textX2,
+            y: textY2,
+            size: params.vdpFontSize,
+            font: vdpFont,
+            color: vdpColor,
+          });
+        }
       }
     };
 
