@@ -142,6 +142,7 @@ const MESSAGES = {
     badSheet: "Neteisingas lapo dydis.",
     front: "Priekis",
     back: "Galas",
+    sig: (a, b) => `Sąsiuvinis ${a}/${b}`,
   },
   en: {
     reading: "Reading files...",
@@ -161,6 +162,7 @@ const MESSAGES = {
     badSheet: "Invalid sheet size.",
     front: "Front",
     back: "Back",
+    sig: (a, b) => `Signature ${a}/${b}`,
   },
 };
 
@@ -222,7 +224,13 @@ self.onmessage = async (e) => {
 
     if (params.profileSelection.startsWith("bc")) type = "bc";
     if (params.profileSelection.startsWith("cutstack")) type = "cutstack";
+    if (params.profileSelection.startsWith("perfect")) type = "perfect";
     if (params.profileSelection === "booklet") type = "booklet";
+    if (params.profileSelection === "signatures") type = "signatures";
+    // Saddle-stitch booklets and sewn signatures are both built from
+    // folded 4-page spreads; a perfect-bound block is always two-sided.
+    const isBooklet = type === "booklet" || type === "signatures";
+    const duplexMode = params.isDuplexMode || type === "perfect";
     if (params.profileSelection.endsWith("exact")) hasBleed = false;
 
     progress(M.reading, M.readingDetail(files.length), 5);
@@ -345,7 +353,7 @@ self.onmessage = async (e) => {
             obj: frontItem.obj,
             vdpText: winAnsiSafe(params.vdpPrefix + numStr),
           });
-          if (params.isDuplexMode) {
+          if (duplexMode) {
             if (backItem)
               allElements.push({ type: backItem.type, obj: backItem.obj });
             else allElements.push(null);
@@ -402,13 +410,33 @@ self.onmessage = async (e) => {
     let cols, rows, useLandscape;
     let rotated = false;
 
-    if (type === "booklet") {
-      useLandscape = true;
-      cols = 2;
-      rows = 1;
-      gutterMm = 0;
-      if (cutWMm * 2 > maxUsableLong || cutHMm > maxUsableShort)
-        throw new Error(M.bookletFit(sheetLabel));
+    if (isBooklet) {
+      // Grid of open spreads (two pages side by side, folded at the spine).
+      const spreadW = cutWMm * 2;
+      const fitSpread = (land) => {
+        const W = land ? maxUsableLong : maxUsableShort;
+        const H = land ? maxUsableShort : maxUsableLong;
+        const c = Math.max(0, Math.floor((W + gutterMm) / (spreadW + gutterMm)));
+        const r = Math.max(0, Math.floor((H + gutterMm) / (cutHMm + gutterMm)));
+        return { land, cols: c, rows: r, n: c * r };
+      };
+      let lands = [true, false];
+      if (params.orientSelection === "landscape") lands = [true];
+      else if (params.orientSelection === "portrait") lands = [false];
+      let best = null;
+      for (const land of lands) {
+        const f = fitSpread(land);
+        if (f.n === 0) continue;
+        if (params.bookletUp !== "max") {
+          best = { land, cols: 1, rows: 1, n: 1 };
+          break;
+        }
+        if (!best || f.n > best.n) best = f;
+      }
+      if (!best) throw new Error(M.bookletFit(sheetLabel));
+      useLandscape = best.land;
+      cols = best.cols;
+      rows = best.rows;
     } else {
       const fit = (land, rot) => {
         const W = land ? maxUsableLong : maxUsableShort;
@@ -447,7 +475,9 @@ self.onmessage = async (e) => {
     const pageW = useLandscape ? mmToPt(sheetLongMm) : mmToPt(sheetShortMm);
     const pageH = useLandscape ? mmToPt(sheetShortMm) : mmToPt(sheetLongMm);
     // Cell sizes as laid out on the sheet (swapped when rotated).
-    const cutW = mmToPt(rotated ? cutHMm : cutWMm);
+    // Width of one page of a booklet spread.
+    const pageCutW = mmToPt(cutWMm);
+    const cutW = isBooklet ? pageCutW * 2 : mmToPt(rotated ? cutHMm : cutWMm);
     const cutH = mmToPt(rotated ? cutWMm : cutHMm);
     const gutter = mmToPt(gutterMm);
     const drawW = mmToPt(artWMm);
@@ -507,7 +537,7 @@ self.onmessage = async (e) => {
         color: REGISTRATION,
       });
 
-    const drawCropMarksAndSlug = (page, isBack, sheetNo, sheetTotal) => {
+    const drawCropMarksAndSlug = (page, isBack, sheetNo, sheetTotal, extra = "") => {
       const startX = baseX + (isBack ? backDX : 0);
       const startY = baseY + (isBack ? backDY : 0);
       const xs = [],
@@ -534,12 +564,29 @@ self.onmessage = async (e) => {
           line(page, startX - cropGap, y, startX - cropGap - cropLen, y);
           line(page, right + cropGap, y, right + cropGap + cropLen, y);
         }
+        if (isBooklet) {
+          // Dashed fold marks on each spine.
+          for (let c = 0; c < cols; c++) {
+            const x = startX + c * (cutW + gutter) + pageCutW;
+            for (const [y1, y2] of [
+              [startY - cropGap, startY - cropGap - cropLen],
+              [top + cropGap, top + cropGap + cropLen],
+            ])
+              page.drawLine({
+                start: { x, y: y1 },
+                end: { x, y: y2 },
+                thickness: markThickness,
+                color: REGISTRATION,
+                dashArray: [2, 2],
+              });
+          }
+        }
       }
       if (params.addSlug) {
-        const side = params.isDuplexMode ? ` · ${isBack ? M.back : M.front}` : "";
+        const side = duplexMode || isBooklet ? ` · ${isBack ? M.back : M.front}` : "";
         const text =
           `${baseName} · ${round1(cutWMm)}×${round1(cutHMm)} mm · ${cols}×${rows}` +
-          ` · ${sheetNo}/${sheetTotal}${side}`;
+          ` · ${sheetNo}/${sheetTotal}${extra ? " · " + extra : ""}${side}`;
         page.drawText(winAnsiSafe(text), {
           x: startX,
           // Above the crop marks so the text never runs through them.
@@ -568,28 +615,74 @@ self.onmessage = async (e) => {
 
     let physicalSheets = 0;
 
-    if (type === "booklet") {
+    if (isBooklet) {
       while (allElements.length % 4 !== 0) allElements.push(null);
-      const totalPages = allElements.length;
-      const sheets = totalPages / 4;
-      physicalSheets = sheets;
-      for (let s = 0; s < sheets; s++) {
-        reportProgress(s + 1, sheets);
-        const frontSheet = newPdf.addPage([pageW, pageH]);
-        const backSheet = newPdf.addPage([pageW, pageH]);
-        const fx = baseX - offset,
-          fy = baseY - offset;
-        const bx = fx + backDX,
-          by = fy + backDY;
-        stampElement(frontSheet, allElements[totalPages - 1 - s * 2], fx, fy, 0);
-        stampElement(frontSheet, allElements[s * 2], fx + cutW, fy, 0);
-        stampElement(backSheet, allElements[s * 2 + 1], bx, by, 0);
-        stampElement(backSheet, allElements[totalPages - 2 - s * 2], bx + cutW, by, 0);
-        drawCropMarksAndSlug(frontSheet, false, s + 1, sheets);
-        drawCropMarksAndSlug(backSheet, true, s + 1, sheets);
-      }
+      // Saddle stitch = one signature holding every page; sewn books are
+      // split into signatures of N folded sheets (4 pages per sheet).
+      const sigPages =
+        type === "signatures"
+          ? Math.max(1, Math.floor(params.sigSheets) || 1) * 4
+          : allElements.length;
+      const signatures = [];
+      for (let i = 0; i < allElements.length; i += sigPages)
+        signatures.push(allElements.slice(i, i + sigPages));
+      const totalSheets = allElements.length / 4;
+      physicalSheets = totalSheets;
+
+      // Clip so a page's bleed never spills over its neighbour at the spine.
+      const clipped = (page, x, y, w, h, draw) => {
+        page.pushOperators(
+          PDFLib.pushGraphicsState(),
+          PDFLib.rectangle(x, y, w, h),
+          PDFLib.clip(),
+          PDFLib.endPath(),
+        );
+        draw();
+        page.pushOperators(PDFLib.popGraphicsState());
+      };
+      // (cx, cy) = bottom-left trim corner of the spread; `shift` moves both
+      // pages toward the spine to compensate creep of inner sheets.
+      const placeSpread = (page, left, right, cx, cy, shift) => {
+        const h = cutH + offset * 2;
+        clipped(page, cx - offset, cy - offset, pageCutW + offset, h, () =>
+          stampElement(page, left, cx - offset + shift, cy - offset, 0),
+        );
+        clipped(page, cx + pageCutW, cy - offset, pageCutW + offset, h, () =>
+          stampElement(page, right, cx + pageCutW - offset - shift, cy - offset, 0),
+        );
+      };
+
+      let sheetNo = 0;
+      signatures.forEach((sig, g) => {
+        const n = sig.length;
+        for (let s = 0; s < n / 4; s++) {
+          sheetNo++;
+          reportProgress(sheetNo, totalSheets);
+          const shift = mmToPt((params.creep || 0) * s);
+          const frontSheet = newPdf.addPage([pageW, pageH]);
+          const backSheet = newPdf.addPage([pageW, pageH]);
+          for (let r = 0; r < rows; r++) {
+            for (let c = 0; c < cols; c++) {
+              const cx = baseX + c * (cutW + gutter);
+              const cy = baseY + r * (cutH + gutter);
+              placeSpread(frontSheet, sig[n - 1 - s * 2], sig[s * 2], cx, cy, shift);
+              placeSpread(
+                backSheet,
+                sig[s * 2 + 1],
+                sig[n - 2 - s * 2],
+                cx + backDX,
+                cy + backDY,
+                shift,
+              );
+            }
+          }
+          const label = signatures.length > 1 ? M.sig(g + 1, signatures.length) : "";
+          drawCropMarksAndSlug(frontSheet, false, sheetNo, totalSheets, label);
+          drawCropMarksAndSlug(backSheet, true, sheetNo, totalSheets, label);
+        }
+      });
     } else {
-      const duplex = params.isDuplexMode;
+      const duplex = duplexMode;
       const units = [];
       if (duplex) {
         for (let i = 0; i < allElements.length; i += 2)
@@ -600,7 +693,7 @@ self.onmessage = async (e) => {
 
       const slots = cols * rows;
       let sheets, pick;
-      if (type === "cutstack") {
+      if (type === "cutstack" || type === "perfect") {
         // Column-major through the stack: each slot position holds a
         // consecutive run so the cut stacks come out in order.
         sheets = Math.ceil(units.length / slots);
@@ -654,8 +747,8 @@ self.onmessage = async (e) => {
     }
 
     // Area of the finished items vs. the whole sheet.
-    const perSheet = type === "booklet" ? 2 : cols * rows;
-    const usedArea = perSheet * cutWMm * cutHMm;
+    const perSheet = cols * rows;
+    const usedArea = perSheet * (isBooklet ? 2 : 1) * cutWMm * cutHMm;
     self.postMessage({
       type: "layout",
       cols,
@@ -675,12 +768,16 @@ self.onmessage = async (e) => {
 
     const suffixLabel = hasBleed ? "bleed" : "exact";
     const modeLabel = params.isNestingMode ? "Nested" : "Cloned";
-    const plexLabel = params.isDuplexMode ? "Duplex" : "Simplex";
+    const plexLabel = duplexMode ? "Duplex" : "Simplex";
     const rotLabel = rotated ? "_Rot90" : "";
 
     let newFileName = `${baseName}_${sheetLabel}_${type.toUpperCase()}_${cols}x${rows}${rotLabel}_${modeLabel}_${plexLabel}_${suffixLabel}.pdf`;
     if (type === "booklet")
-      newFileName = `${baseName}_${sheetLabel}_Booklet_Spreads_${suffixLabel}.pdf`;
+      newFileName = `${baseName}_${sheetLabel}_Booklet_${perSheet}up_${suffixLabel}.pdf`;
+    if (type === "signatures")
+      newFileName = `${baseName}_${sheetLabel}_Signatures_${params.sigSheets}sh_${perSheet}up_${suffixLabel}.pdf`;
+    if (type === "perfect")
+      newFileName = `${baseName}_${sheetLabel}_PerfectBound_${cols}x${rows}${rotLabel}_CutStack_${suffixLabel}.pdf`;
 
     self.postMessage({ type: "success", pdfBytes, fileName: newFileName }, [
       pdfBytes.buffer,

@@ -167,9 +167,41 @@
                   <option value="auto-bleed" selected data-i18n="pAutoBleed">Smart Fit (su bleed ir tarpais)</option>
                   <option value="cutstack-exact" data-i18n="pCutExact">Cut &amp; Stack (be bleed)</option>
                   <option value="cutstack-bleed" data-i18n="pCutBleed">Cut &amp; Stack (su bleed)</option>
-                  <option value="booklet" data-i18n="pBooklet">Brošiūra (sankabėlės)</option>
+                  <optgroup label="Knygos ir brošiūros" data-i18n-label="grpBooks">
+                    <option value="booklet" data-i18n="pBooklet">Brošiūra (sankabėlės)</option>
+                    <option value="signatures" data-i18n="pSignatures">Knyga – siuvami sąsiuviniai</option>
+                    <option value="perfect-bleed" data-i18n="pPerfect">Knyga – klijuotas blokas (Cut &amp; Stack)</option>
+                  </optgroup>
                 </select>
               </div>
+
+              <div class="sub-panel" data-show-if="imposition-profile=booklet|imposition-profile=signatures">
+                <div class="range-group" data-show-if="imposition-profile=signatures">
+                  <label class="range-header" for="input-sig-sheets"><span data-i18n="sigSheets">Lapų sąsiuvinyje</span></label>
+                  <input type="number" id="input-sig-sheets" value="4" min="1" max="16" class="num-input" />
+                  <p class="hint" data-i18n="sigHint">1 lapas = 4 puslapiai. Pvz. 4 lapai = 16 psl. sąsiuvinis.</p>
+                </div>
+                <div class="panel-grid">
+                  <div class="select-group">
+                    <label class="dropdown-label" for="booklet-up" data-i18n="bookletUp">Atvartų lape</label>
+                    <select id="booklet-up">
+                      <option value="1">1</option>
+                      <option value="max" data-i18n="upMax">Kiek telpa</option>
+                    </select>
+                  </div>
+                  <div class="range-group">
+                    <label class="range-header" for="input-creep"><span data-i18n="creep">Creep (mm/lapui)</span></label>
+                    <input type="number" id="input-creep" value="0" min="0" max="2" step="0.05" class="num-input" />
+                  </div>
+                </div>
+                <p class="hint" data-i18n="creepHint">
+                  Creep – kiek kiekvienas vidinis lapas pastumiamas link nugarėlės. Paprastai ≈ popieriaus storis (pvz. 0,1 mm).
+                </p>
+              </div>
+
+              <p class="hint" data-show-if="imposition-profile=perfect-bleed" data-i18n="perfectHint">
+                Puslapiai spausdinami dvipusiai iš eilės. Supjaustykite, sudėkite krūveles iš eilės – gausite knygos bloką klijavimui.
+              </p>
 
               <div class="select-group">
                 <label class="dropdown-label" for="sheet-size" data-i18n="sheetSize">Spaudos lapas</label>
@@ -225,7 +257,7 @@
           <details class="section" open>
             <summary data-i18n="secPrint">Spauda</summary>
             <div class="section-body">
-              <div class="toggle-row" data-hide-if="imposition-profile=booklet">
+              <div class="toggle-row" data-hide-if="imposition-profile=booklet|imposition-profile=signatures|imposition-profile=perfect-bleed">
                 <span data-i18n="gridMode">Užpildymas</span>
                 <div class="mode-selector">
                   <span id="label-clone" class="mode-label active" data-i18n="clone">Kartoti</span>
@@ -233,11 +265,11 @@
                   <span id="label-nest" class="mode-label" data-i18n="nest">Iš eilės</span>
                 </div>
               </div>
-              <p class="hint" data-hide-if="imposition-profile=booklet" data-i18n="gridHint">
+              <p class="hint" data-hide-if="imposition-profile=booklet|imposition-profile=signatures|imposition-profile=perfect-bleed" data-i18n="gridHint">
                 Kartoti – kiekvienas puslapis užpildo visą lapą. Iš eilės – puslapiai dedami vienas po kito.
               </p>
 
-              <div class="toggle-row" data-hide-if="imposition-profile=booklet">
+              <div class="toggle-row" data-hide-if="imposition-profile=booklet|imposition-profile=signatures|imposition-profile=perfect-bleed">
                 <span data-i18n="sides">Pusės</span>
                 <div class="mode-selector">
                   <span id="label-simplex" class="mode-label active" data-i18n="simplex">Vienpusė</span>
@@ -246,8 +278,8 @@
                 </div>
               </div>
 
-              <div class="sub-panel" data-show-if="duplex-toggle|imposition-profile=booklet">
-                <div class="select-group" data-hide-if="imposition-profile=booklet">
+              <div class="sub-panel" data-show-if="duplex-toggle|imposition-profile=booklet|imposition-profile=signatures|imposition-profile=perfect-bleed">
+                <div class="select-group" data-hide-if="imposition-profile=booklet|imposition-profile=signatures">
                   <label class="dropdown-label" for="flip-edge" data-i18n="flip">Lapo apvertimas</label>
                   <select id="flip-edge">
                     <option value="lr" data-i18n="flipLr">Kairė ↔ dešinė (standartinis)</option>

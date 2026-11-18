@@ -49,6 +49,18 @@ const I18N = {
     pCutExact: "Cut & Stack (be bleed)",
     pCutBleed: "Cut & Stack (su bleed)",
     pBooklet: "Brošiūra (sankabėlės)",
+    grpBooks: "Knygos ir brošiūros",
+    pSignatures: "Knyga – siuvami sąsiuviniai",
+    pPerfect: "Knyga – klijuotas blokas (Cut & Stack)",
+    sigSheets: "Lapų sąsiuvinyje",
+    sigHint: "1 lapas = 4 puslapiai. Pvz. 4 lapai = 16 psl. sąsiuvinis.",
+    bookletUp: "Atvartų lape",
+    upMax: "Kiek telpa",
+    creep: "Creep (mm/lapui)",
+    creepHint:
+      "Creep – kiek kiekvienas vidinis lapas pastumiamas link nugarėlės. Paprastai ≈ popieriaus storis (pvz. 0,1 mm).",
+    perfectHint:
+      "Puslapiai spausdinami dvipusiai iš eilės. Supjaustykite, sudėkite krūveles iš eilės – gausite knygos bloką klijavimui.",
     sheetSize: "Spaudos lapas",
     custom: "Kitas dydis…",
     widthMm: "Plotis (mm)",
@@ -148,6 +160,18 @@ const I18N = {
     pCutExact: "Cut & Stack (no bleed)",
     pCutBleed: "Cut & Stack (with bleed)",
     pBooklet: "Saddle-stitch booklet",
+    grpBooks: "Books & booklets",
+    pSignatures: "Book – sewn signatures",
+    pPerfect: "Book – perfect-bound block (cut & stack)",
+    sigSheets: "Sheets per signature",
+    sigHint: "1 sheet = 4 pages. E.g. 4 sheets = a 16-page signature.",
+    bookletUp: "Spreads per sheet",
+    upMax: "As many as fit",
+    creep: "Creep (mm per sheet)",
+    creepHint:
+      "Creep – how far each inner sheet is shifted toward the spine. Usually ≈ paper thickness (e.g. 0.1 mm).",
+    perfectHint:
+      "Pages print two-sided in order. Cut, then put the stacks on top of each other in order to get a block ready for gluing.",
     sheetSize: "Press sheet",
     custom: "Custom size…",
     widthMm: "Width (mm)",
@@ -237,6 +261,9 @@ function applyLanguage() {
   });
   document.querySelectorAll("[data-i18n-title]").forEach((el) => {
     el.title = t(el.dataset.i18nTitle);
+  });
+  document.querySelectorAll("[data-i18n-label]").forEach((el) => {
+    el.label = t(el.dataset.i18nLabel);
   });
   document.querySelectorAll(".lang-switch button").forEach((b) => {
     b.classList.toggle("active", b.dataset.lang === lang);
@@ -526,6 +553,9 @@ async function triggerRenderEngine() {
     isNestingMode: c("mode-toggle"),
     isDuplexMode: c("duplex-toggle"),
     flipEdge: v("flip-edge"),
+    sigSheets: parseInt(v("input-sig-sheets")) || 1,
+    bookletUp: v("booklet-up"),
+    creep: n("input-creep"),
     backOffsetX: n("input-back-x"),
     backOffsetY: n("input-back-y"),
     addSlug: c("slug-toggle"),
