@@ -123,8 +123,78 @@ const SHEET_DIMENSIONS = {
   A4: { long: 297, short: 210 },
 };
 
+const MESSAGES = {
+  lt: {
+    reading: "Skaitomi failai...",
+    readingDetail: (n) => `Failų: ${n}`,
+    extracting: "Ruošiami puslapiai...",
+    extractingDetail: (n) => `Paruošta puslapių: ${n}`,
+    rendering: "Kuriamas maketas...",
+    sheet: (a, b) => `Lapas ${a} iš ${b}`,
+    saving: "Generuojamas PDF...",
+    savingDetail: "Beveik baigta",
+    bcSize: (w, h, ew, eh) =>
+      `Netinkamas dydis: failas ${w}×${h} mm, tikėtasi ${ew}×${eh} mm.`,
+    mismatch: (name, w, h, ew, eh) =>
+      `Failo „${name}“ dydis ${w}×${h} mm nesutampa su pirmuoju (${ew}×${eh} mm).`,
+    bookletFit: (s) => `Atvartas netelpa į ${s} lapą.`,
+    noFit: (w, h, s) => `${w}×${h} mm gaminys netelpa į ${s} lapą su nurodytomis paraštėmis.`,
+    badSheet: "Neteisingas lapo dydis.",
+    front: "Priekis",
+    back: "Galas",
+  },
+  en: {
+    reading: "Reading files...",
+    readingDetail: (n) => `Files: ${n}`,
+    extracting: "Preparing pages...",
+    extractingDetail: (n) => `Pages ready: ${n}`,
+    rendering: "Building layout...",
+    sheet: (a, b) => `Sheet ${a} of ${b}`,
+    saving: "Generating PDF...",
+    savingDetail: "Almost done",
+    bcSize: (w, h, ew, eh) =>
+      `Wrong size: file is ${w}×${h} mm, expected ${ew}×${eh} mm.`,
+    mismatch: (name, w, h, ew, eh) =>
+      `"${name}" is ${w}×${h} mm, which doesn't match the first file (${ew}×${eh} mm).`,
+    bookletFit: (s) => `The spread doesn't fit on ${s}.`,
+    noFit: (w, h, s) => `A ${w}×${h} mm item doesn't fit on ${s} with these margins.`,
+    badSheet: "Invalid sheet size.",
+    front: "Front",
+    back: "Back",
+  },
+};
+
+const round1 = (v) => Math.round(v * 10) / 10;
+
+// Standard PDF fonts only cover WinAnsi; strip accents (ą→a, č→c, ...) and
+// replace anything else so a file name can't abort the whole render.
+function winAnsiSafe(text) {
+  return String(text)
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^ -~ -ÿ]/g, "?");
+}
+
+// Maps a point (u, v) in artwork space to sheet space for a given rotation,
+// where (ox, oy) is the bottom-left corner of the rotated cell.
+function rotatePoint(rot, ox, oy, cellW, cellH, u, v) {
+  switch (rot) {
+    case 90:
+      return { x: ox + cellW - v, y: oy + u };
+    case 180:
+      return { x: ox + cellW - u, y: oy + cellH - v };
+    case 270:
+      return { x: ox + v, y: oy + cellH - u };
+    default:
+      return { x: ox + u, y: oy + v };
+  }
+}
+
 self.onmessage = async (e) => {
   const { files, params } = e.data;
+  const M = MESSAGES[params.lang] || MESSAGES.lt;
+  const progress = (title, detail, percent) =>
+    self.postMessage({ type: "progress", title, detail, percent });
 
   try {
     const newPdf = await PDFLib.PDFDocument.create();
@@ -137,64 +207,8 @@ self.onmessage = async (e) => {
     if (params.vdpFontFamily === "CourierBold")
       targetFontEnum = PDFLib.StandardFonts.CourierBold;
     const vdpFont = await newPdf.embedFont(targetFontEnum);
-
     const vdpColor = hexToCmyk(params.vdpFontColor || "#000000");
     const slugFont = await newPdf.embedFont(PDFLib.StandardFonts.Helvetica);
-
-    const stampElement = (targetPage, element, xPos, yPos, w, h) => {
-      if (!element) return;
-      if (element.type === "page")
-        targetPage.drawPage(element.obj, {
-          x: xPos,
-          y: yPos,
-          width: w,
-          height: h,
-        });
-      else if (element.type === "image")
-        targetPage.drawImage(element.obj, {
-          x: xPos,
-          y: yPos,
-          width: w,
-          height: h,
-        });
-
-      // if (element.vdpText) {
-      //   const textX = xPos + mmToPt(params.vdpX);
-      //   const textY = yPos + mmToPt(params.vdpY);
-      //   targetPage.drawText(element.vdpText, {
-      //     x: textX,
-      //     y: textY,
-      //     size: params.vdpFontSize,
-      //     font: vdpFont,
-      //     color: vdpColor,
-      //   });
-      // }
-      if (element.vdpText) {
-        // Draw the first ticket number
-        const textX = xPos + mmToPt(params.vdpX);
-        const textY = yPos + mmToPt(params.vdpY);
-        targetPage.drawText(element.vdpText, {
-          x: textX,
-          y: textY,
-          size: params.vdpFontSize,
-          font: vdpFont,
-          color: vdpColor,
-        });
-
-        // Draw the second ticket number if enabled
-        if (params.vdpActive2) {
-          const textX2 = xPos + mmToPt(params.vdpX2);
-          const textY2 = yPos + mmToPt(params.vdpY2);
-          targetPage.drawText(element.vdpText, {
-            x: textX2,
-            y: textY2,
-            size: params.vdpFontSize,
-            font: vdpFont,
-            color: vdpColor,
-          });
-        }
-      }
-    };
 
     let allElements = [];
     let artWMm = 0,
@@ -211,12 +225,7 @@ self.onmessage = async (e) => {
     if (params.profileSelection === "booklet") type = "booklet";
     if (params.profileSelection.endsWith("exact")) hasBleed = false;
 
-    self.postMessage({
-      type: "progress",
-      title: "Extracting Data...",
-      detail: `Reading ${files.length} payloads`,
-      percent: 5,
-    });
+    progress(M.reading, M.readingDetail(files.length), 5);
 
     // --- PHASE 1: EXTRACTION & VDP MULTIPLICATION ---
     for (let i = 0; i < files.length; i++) {
@@ -231,8 +240,8 @@ self.onmessage = async (e) => {
         const trimBox = srcPages[0].getTrimBox();
         const bleedBox = srcPages[0].getBleedBox();
 
-        const trimWMm = Math.round(ptToMm(trimBox.width) * 10) / 10;
-        const trimHMm = Math.round(ptToMm(trimBox.height) * 10) / 10;
+        const trimWMm = round1(ptToMm(trimBox.width));
+        const trimHMm = round1(ptToMm(trimBox.height));
 
         // Smallest bleed on any of the four sides, rounded DOWN to 0.5 mm so
         // the crop window never reaches past the artwork's real bleed.
@@ -281,8 +290,8 @@ self.onmessage = async (e) => {
         if (file.type === "image/jpeg")
           img = await newPdf.embedJpg(file.buffer);
         else img = await newPdf.embedPng(file.buffer);
-        currentWMm = Math.round((img.width / dpi.x) * 25.4 * 10) / 10;
-        currentHMm = Math.round((img.height / dpi.y) * 25.4 * 10) / 10;
+        currentWMm = round1((img.width / dpi.x) * 25.4);
+        currentHMm = round1((img.height / dpi.y) * 25.4);
         extractedItems = [{ type: "image", obj: img }];
       }
 
@@ -310,34 +319,31 @@ self.onmessage = async (e) => {
               Math.abs(artHMm - expectedH) > 1.5
             ) {
               throw new Error(
-                `Size Error: Got ${Math.round(artWMm)}x${Math.round(artHMm)}mm instead of ${expectedW}x${expectedH}mm.`,
+                M.bcSize(round1(artWMm), round1(artHMm), expectedW, expectedH),
               );
             }
           }
         }
-      } else {
-        if (
-          !params.forceScale &&
-          !params.vdpActive &&
-          (Math.abs(currentWMm - artWMm) > 1.5 ||
-            Math.abs(currentHMm - artHMm) > 1.5)
-        ) {
-          throw new Error(
-            `Batch Error! Multi-file sequence dimension mismatch.`,
-          );
-        }
+      } else if (
+        !params.forceScale &&
+        !params.vdpActive &&
+        (Math.abs(currentWMm - artWMm) > 1.5 ||
+          Math.abs(currentHMm - artHMm) > 1.5)
+      ) {
+        throw new Error(
+          M.mismatch(file.name, currentWMm, currentHMm, artWMm, artHMm),
+        );
       }
 
       if (params.vdpActive && type === "cutstack" && i === 0) {
         const frontItem = extractedItems[0];
         const backItem = extractedItems.length > 1 ? extractedItems[1] : null;
         for (let n = params.vdpStart; n <= params.vdpEnd; n++) {
-          let numStr = String(n).padStart(params.vdpPad, "0");
-          let injectedText = params.vdpPrefix + numStr;
+          const numStr = String(n).padStart(params.vdpPad, "0");
           allElements.push({
             type: frontItem.type,
             obj: frontItem.obj,
-            vdpText: injectedText,
+            vdpText: winAnsiSafe(params.vdpPrefix + numStr),
           });
           if (params.isDuplexMode) {
             if (backItem)
@@ -349,12 +355,11 @@ self.onmessage = async (e) => {
       } else {
         allElements.push(...extractedItems);
       }
-      self.postMessage({
-        type: "progress",
-        title: "Extracting Pages...",
-        detail: `Processed ${allElements.length} pages`,
-        percent: 5 + Math.round((i / files.length) * 15),
-      });
+      progress(
+        M.extracting,
+        M.extractingDetail(allElements.length),
+        5 + Math.round((i / files.length) * 15),
+      );
     }
 
     self.postMessage({
@@ -365,16 +370,37 @@ self.onmessage = async (e) => {
     });
 
     // --- PHASE 2: CALCULATE TARGET GEOMETRY ---
-    const sheetLongMm = SHEET_DIMENSIONS[params.sheetSelection].long;
-    const sheetShortMm = SHEET_DIMENSIONS[params.sheetSelection].short;
+    let sheetLongMm, sheetShortMm, sheetLabel;
+    if (params.sheetSelection === "custom") {
+      const a = params.customSheetW,
+        b = params.customSheetH;
+      if (!(a > 0 && b > 0)) throw new Error(M.badSheet);
+      sheetLongMm = Math.max(a, b);
+      sheetShortMm = Math.min(a, b);
+      sheetLabel = `${a}x${b}`;
+    } else {
+      sheetLongMm = SHEET_DIMENSIONS[params.sheetSelection].long;
+      sheetShortMm = SHEET_DIMENSIONS[params.sheetSelection].short;
+      sheetLabel = params.sheetSelection;
+    }
+
     let gutterMm = hasBleed ? params.userGutter : 0;
     const cutWMm = hasBleed ? artWMm - bleedMm * 2 : artWMm;
     const cutHMm = hasBleed ? artHMm - bleedMm * 2 : artHMm;
+    const outerBleed = hasBleed ? bleedMm : 0;
 
-    const reserveMargin = (params.userCropLen + params.userCropGap + 2) * 2;
-    const maxUsableLong = sheetLongMm - reserveMargin;
-    const maxUsableShort = sheetShortMm - reserveMargin;
+    // Space kept free around the grid: the press's unprintable margin plus
+    // room for crop marks / slug (or at least the bleed).
+    let markReserve = outerBleed;
+    if (params.addCropMarks)
+      markReserve = Math.max(params.userCropLen + params.userCropGap + 2, outerBleed);
+    else if (params.addSlug) markReserve = Math.max(4, outerBleed);
+    const edgeMm = (params.sheetMargin || 0) + markReserve;
+    const maxUsableLong = sheetLongMm - edgeMm * 2;
+    const maxUsableShort = sheetShortMm - edgeMm * 2;
+
     let cols, rows, useLandscape;
+    let rotated = false;
 
     if (type === "booklet") {
       useLandscape = true;
@@ -382,161 +408,146 @@ self.onmessage = async (e) => {
       rows = 1;
       gutterMm = 0;
       if (cutWMm * 2 > maxUsableLong || cutHMm > maxUsableShort)
-        throw new Error(
-          `Spread boundary fits outside ${params.sheetSelection}`,
-        );
+        throw new Error(M.bookletFit(sheetLabel));
     } else {
-      const colsL = Math.floor(
-        (maxUsableLong + gutterMm) / (cutWMm + gutterMm),
-      );
-      const rowsL = Math.floor(
-        (maxUsableShort + gutterMm) / (cutHMm + gutterMm),
-      );
-      const colsP = Math.floor(
-        (maxUsableShort + gutterMm) / (cutWMm + gutterMm),
-      );
-      const rowsP = Math.floor(
-        (maxUsableLong + gutterMm) / (cutHMm + gutterMm),
-      );
-      if (params.orientSelection === "landscape") {
-        useLandscape = true;
-        cols = colsL;
-        rows = rowsL;
-      } else if (params.orientSelection === "portrait") {
-        useLandscape = false;
-        cols = colsP;
-        rows = rowsP;
-      } else {
-        if (type === "bc" && params.sheetSelection === "SRA4")
-          useLandscape = true;
-        else if (type === "bc") useLandscape = false;
-        else useLandscape = colsL * rowsL >= colsP * rowsP;
-        cols = useLandscape ? colsL : colsP;
-        rows = useLandscape ? rowsL : rowsP;
-      }
-      if (cols === 0 || rows === 0)
-        throw new Error(
-          `Imposition Matrix calculations fall outside sheet dimensions.`,
-        );
+      const fit = (land, rot) => {
+        const W = land ? maxUsableLong : maxUsableShort;
+        const H = land ? maxUsableShort : maxUsableLong;
+        const cw = rot ? cutHMm : cutWMm;
+        const ch = rot ? cutWMm : cutHMm;
+        const c = Math.max(0, Math.floor((W + gutterMm) / (cw + gutterMm)));
+        const r = Math.max(0, Math.floor((H + gutterMm) / (ch + gutterMm)));
+        return { land, rot, cols: c, rows: r, n: c * r };
+      };
+
+      let lands;
+      if (params.orientSelection === "landscape") lands = [true];
+      else if (params.orientSelection === "portrait") lands = [false];
+      else if (type === "bc") lands = [params.sheetSelection === "SRA4"];
+      else lands = [true, false];
+
+      let rots = [false];
+      if (params.rotateMode === "on") rots = [true];
+      else if (params.rotateMode === "auto") rots = [false, true];
+
+      let best = null;
+      for (const rot of rots)
+        for (const land of lands) {
+          const f = fit(land, rot);
+          if (!best || f.n > best.n) best = f;
+        }
+      if (!best || best.n === 0)
+        throw new Error(M.noFit(round1(cutWMm), round1(cutHMm), sheetLabel));
+      useLandscape = best.land;
+      rotated = best.rot;
+      cols = best.cols;
+      rows = best.rows;
     }
 
     const pageW = useLandscape ? mmToPt(sheetLongMm) : mmToPt(sheetShortMm);
     const pageH = useLandscape ? mmToPt(sheetShortMm) : mmToPt(sheetLongMm);
-    const cutW = mmToPt(cutWMm);
-    const cutH = mmToPt(cutHMm);
+    // Cell sizes as laid out on the sheet (swapped when rotated).
+    const cutW = mmToPt(rotated ? cutHMm : cutWMm);
+    const cutH = mmToPt(rotated ? cutWMm : cutHMm);
     const gutter = mmToPt(gutterMm);
     const drawW = mmToPt(artWMm);
     const drawH = mmToPt(artHMm);
-    const offset = hasBleed ? mmToPt(bleedMm) : 0;
+    const offset = mmToPt(outerBleed);
 
     const gridTotalW = cols * cutW + (cols - 1) * gutter;
     const gridTotalH = rows * cutH + (rows - 1) * gutter;
-    const startX = (pageW - gridTotalW) / 2;
-    const startY = (pageH - gridTotalH) / 2;
+    const baseX = (pageW - gridTotalW) / 2;
+    const baseY = (pageH - gridTotalH) / 2;
+    const backDX = mmToPt(params.backOffsetX || 0);
+    const backDY = mmToPt(params.backOffsetY || 0);
+    const tumble = params.flipEdge === "tumble";
 
     const cropGap = mmToPt(params.userCropGap);
     const cropLen = mmToPt(params.userCropLen);
-    const markColor = REGISTRATION;
     const markThickness = 0.5;
 
-    // UPGRADED STAMP LAYOUT HANDLER
-    const drawCropMarksAndSlug = (page) => {
+    // Draws one item with its bottom-left cell corner (incl. bleed) at (x, y).
+    const stampElement = (page, element, x, y, rot) => {
+      if (!element) return;
+      const cellW = rot % 180 ? drawH : drawW;
+      const cellH = rot % 180 ? drawW : drawH;
+      const o = rotatePoint(rot, x, y, cellW, cellH, 0, 0);
+      const opts = {
+        x: o.x,
+        y: o.y,
+        width: drawW,
+        height: drawH,
+        rotate: PDFLib.degrees(rot),
+      };
+      if (element.type === "page") page.drawPage(element.obj, opts);
+      else if (element.type === "image") page.drawImage(element.obj, opts);
+
+      if (element.vdpText) {
+        const spots = [[params.vdpX, params.vdpY]];
+        if (params.vdpActive2) spots.push([params.vdpX2, params.vdpY2]);
+        for (const [vx, vy] of spots) {
+          const p = rotatePoint(rot, x, y, cellW, cellH, mmToPt(vx), mmToPt(vy));
+          page.drawText(element.vdpText, {
+            x: p.x,
+            y: p.y,
+            size: params.vdpFontSize,
+            font: vdpFont,
+            color: vdpColor,
+            rotate: PDFLib.degrees(rot),
+          });
+        }
+      }
+    };
+
+    const line = (page, x1, y1, x2, y2) =>
+      page.drawLine({
+        start: { x: x1, y: y1 },
+        end: { x: x2, y: y2 },
+        thickness: markThickness,
+        color: REGISTRATION,
+      });
+
+    const drawCropMarksAndSlug = (page, isBack, sheetNo, sheetTotal) => {
+      const startX = baseX + (isBack ? backDX : 0);
+      const startY = baseY + (isBack ? backDY : 0);
+      const xs = [],
+        ys = [];
+      for (let c = 0; c < cols; c++) {
+        const x = startX + c * (cutW + gutter);
+        xs.push(x, x + cutW);
+      }
+      for (let r = 0; r < rows; r++) {
+        const y = startY + r * (cutH + gutter);
+        ys.push(y, y + cutH);
+      }
+      const uniq = (a) =>
+        a.filter((v, i) => a.findIndex((w) => Math.abs(w - v) < 0.01) === i);
+
       if (params.addCropMarks) {
-        // <-- CONTEXT RE-CHECK INJECTED HERE
-        if (hasBleed) {
-          for (let c = 0; c < cols; c++) {
-            const xLeft = startX + c * (cutW + gutter);
-            const xRight = xLeft + cutW;
-            page.drawLine({
-              start: { x: xLeft, y: startY - cropGap },
-              end: { x: xLeft, y: startY - cropGap - cropLen },
-              thickness: markThickness,
-              color: markColor,
-            });
-            page.drawLine({
-              start: { x: xRight, y: startY - cropGap },
-              end: { x: xRight, y: startY - cropGap - cropLen },
-              thickness: markThickness,
-              color: markColor,
-            });
-            page.drawLine({
-              start: { x: xLeft, y: startY + gridTotalH + cropGap },
-              end: { x: xLeft, y: startY + gridTotalH + cropGap + cropLen },
-              thickness: markThickness,
-              color: markColor,
-            });
-            page.drawLine({
-              start: { x: xRight, y: startY + gridTotalH + cropGap },
-              end: { x: xRight, y: startY + gridTotalH + cropGap + cropLen },
-              thickness: markThickness,
-              color: markColor,
-            });
-          }
-          for (let r = 0; r < rows; r++) {
-            const yBottom = startY + r * (cutH + gutter);
-            const yTop = yBottom + cutH;
-            page.drawLine({
-              start: { x: startX - cropGap, y: yBottom },
-              end: { x: startX - cropGap - cropLen, y: yBottom },
-              thickness: markThickness,
-              color: markColor,
-            });
-            page.drawLine({
-              start: { x: startX - cropGap, y: yTop },
-              end: { x: startX - cropGap - cropLen, y: yTop },
-              thickness: markThickness,
-              color: markColor,
-            });
-            page.drawLine({
-              start: { x: startX + gridTotalW + cropGap, y: yBottom },
-              end: { x: startX + gridTotalW + cropGap + cropLen, y: yBottom },
-              thickness: markThickness,
-              color: markColor,
-            });
-            page.drawLine({
-              start: { x: startX + gridTotalW + cropGap, y: yTop },
-              end: { x: startX + gridTotalW + cropGap + cropLen, y: yTop },
-              thickness: markThickness,
-              color: markColor,
-            });
-          }
-        } else {
-          for (let c = 0; c <= cols; c++) {
-            const x = startX + c * cutW;
-            page.drawLine({
-              start: { x: x, y: startY - cropGap },
-              end: { x: x, y: startY - cropGap - cropLen },
-              thickness: markThickness,
-              color: markColor,
-            });
-            page.drawLine({
-              start: { x: x, y: startY + gridTotalH + cropGap },
-              end: { x: x, y: startY + gridTotalH + cropGap + cropLen },
-              thickness: markThickness,
-              color: markColor,
-            });
-          }
-          for (let r = 0; r <= rows; r++) {
-            const y = startY + r * cutH;
-            page.drawLine({
-              start: { x: startX - cropGap, y: y },
-              end: { x: startX - cropGap - cropLen, y: y },
-              thickness: markThickness,
-              color: markColor,
-            });
-            page.drawLine({
-              start: { x: startX + gridTotalW + cropGap, y: y },
-              end: { x: startX + gridTotalW + cropGap + cropLen, y: y },
-              thickness: markThickness,
-              color: markColor,
-            });
-          }
+        const top = startY + gridTotalH;
+        const right = startX + gridTotalW;
+        for (const x of uniq(xs)) {
+          line(page, x, startY - cropGap, x, startY - cropGap - cropLen);
+          line(page, x, top + cropGap, x, top + cropGap + cropLen);
+        }
+        for (const y of uniq(ys)) {
+          line(page, startX - cropGap, y, startX - cropGap - cropLen, y);
+          line(page, right + cropGap, y, right + cropGap + cropLen, y);
         }
       }
       if (params.addSlug) {
-        page.drawText(`${artWMm} x ${artHMm} mm`, {
-          x: startX + 3,
-          y: startY + gridTotalH + cropGap + 1,
+        const side = params.isDuplexMode ? ` · ${isBack ? M.back : M.front}` : "";
+        const text =
+          `${baseName} · ${round1(cutWMm)}×${round1(cutHMm)} mm · ${cols}×${rows}` +
+          ` · ${sheetNo}/${sheetTotal}${side}`;
+        page.drawText(winAnsiSafe(text), {
+          x: startX,
+          // Above the crop marks so the text never runs through them.
+          y:
+            startY +
+            gridTotalH +
+            (params.addCropMarks ? cropGap + cropLen : mmToPt(1)) +
+            1,
           size: 4,
           font: slugFont,
           color: PURE_K,
@@ -544,253 +555,136 @@ self.onmessage = async (e) => {
       }
     };
 
-    // --- PHASE 3: GRID IMPOSITION MATRICES ---
-    const totalSlots = cols * rows;
-    const reportProgress = (current, total, prefix) => {
-      self.postMessage({
-        type: "progress",
-        title: "Rendering Grid Matrix...",
-        detail: `${prefix} ${current} of ${total}`,
-        percent: 20 + Math.round((current / total) * 70),
-      });
-    };
+    const baseName =
+      files.length > 1 ? "GangRun_Batch" : files[0].name.replace(/\.[^/.]+$/, "");
+
+    // --- PHASE 3: PLACE ITEMS ON SHEETS ---
+    const reportProgress = (current, total) =>
+      progress(
+        M.rendering,
+        M.sheet(current, total),
+        20 + Math.round((current / total) * 70),
+      );
+
+    let physicalSheets = 0;
 
     if (type === "booklet") {
       while (allElements.length % 4 !== 0) allElements.push(null);
       const totalPages = allElements.length;
       const sheets = totalPages / 4;
+      physicalSheets = sheets;
       for (let s = 0; s < sheets; s++) {
-        reportProgress(s + 1, sheets, "Spreads");
+        reportProgress(s + 1, sheets);
         const frontSheet = newPdf.addPage([pageW, pageH]);
         const backSheet = newPdf.addPage([pageW, pageH]);
-        const fLeft = allElements[totalPages - 1 - s * 2];
-        const fRight = allElements[s * 2];
-        const bLeft = allElements[s * 2 + 1];
-        const bRight = allElements[totalPages - 2 - s * 2];
-        if (fLeft)
-          stampElement(
-            frontSheet,
-            fLeft,
-            startX - offset,
-            startY - offset,
-            drawW,
-            drawH,
-          );
-        if (fRight)
-          stampElement(
-            frontSheet,
-            fRight,
-            startX + cutW - offset,
-            startY - offset,
-            drawW,
-            drawH,
-          );
-        if (bLeft)
-          stampElement(
-            backSheet,
-            bLeft,
-            startX - offset,
-            startY - offset,
-            drawW,
-            drawH,
-          );
-        if (bRight)
-          stampElement(
-            backSheet,
-            bRight,
-            startX + cutW - offset,
-            startY - offset,
-            drawW,
-            drawH,
-          );
-        drawCropMarksAndSlug(frontSheet);
-        drawCropMarksAndSlug(backSheet);
-      }
-    } else if (type === "cutstack") {
-      if (params.isDuplexMode) {
-        let pairs = [];
-        for (let i = 0; i < allElements.length; i += 2)
-          pairs.push({
-            front: allElements[i],
-            back: allElements[i + 1] || null,
-          });
-        const sheetsNeeded = Math.ceil(pairs.length / totalSlots);
-        for (let s = 0; s < sheetsNeeded; s++) {
-          reportProgress(s + 1, sheetsNeeded, "Sheets");
-          const frontSheet = newPdf.addPage([pageW, pageH]);
-          const backSheet = newPdf.addPage([pageW, pageH]);
-          for (let r = 0; r < rows; r++) {
-            for (let c = 0; c < cols; c++) {
-              let slotIdx = r * cols + c;
-              let pairIdx = slotIdx * sheetsNeeded + s;
-              if (pairIdx < pairs.length) {
-                const pair = pairs[pairIdx];
-                stampElement(
-                  frontSheet,
-                  pair.front,
-                  startX + c * (cutW + gutter) - offset,
-                  startY + r * (cutH + gutter) - offset,
-                  drawW,
-                  drawH,
-                );
-                if (pair.back) {
-                  const mirroredC = cols - 1 - c;
-                  stampElement(
-                    backSheet,
-                    pair.back,
-                    startX + mirroredC * (cutW + gutter) - offset,
-                    startY + r * (cutH + gutter) - offset,
-                    drawW,
-                    drawH,
-                  );
-                }
-              }
-            }
-          }
-          drawCropMarksAndSlug(frontSheet);
-          drawCropMarksAndSlug(backSheet);
-        }
-      } else {
-        const sheetsNeeded = Math.ceil(allElements.length / totalSlots);
-        for (let s = 0; s < sheetsNeeded; s++) {
-          reportProgress(s + 1, sheetsNeeded, "Sheets");
-          const page = newPdf.addPage([pageW, pageH]);
-          for (let r = 0; r < rows; r++) {
-            for (let c = 0; c < cols; c++) {
-              let slotIdx = r * cols + c;
-              let elementIdx = slotIdx * sheetsNeeded + s;
-              if (elementIdx < allElements.length) {
-                stampElement(
-                  page,
-                  allElements[elementIdx],
-                  startX + c * (cutW + gutter) - offset,
-                  startY + r * (cutH + gutter) - offset,
-                  drawW,
-                  drawH,
-                );
-              }
-            }
-          }
-          drawCropMarksAndSlug(page);
-        }
-      }
-    } else if (params.isNestingMode) {
-      if (params.isDuplexMode) {
-        let pairs = [];
-        for (let i = 0; i < allElements.length; i += 2)
-          pairs.push({
-            front: allElements[i],
-            back: allElements[i + 1] || null,
-          });
-        let currentPairIdx = 0;
-        let sheetCount = 0;
-        const totalEstimatedSheets = Math.ceil(pairs.length / totalSlots);
-        while (currentPairIdx < pairs.length) {
-          sheetCount++;
-          reportProgress(sheetCount, totalEstimatedSheets, "Sheets");
-          const frontSheet = newPdf.addPage([pageW, pageH]);
-          const backSheet = newPdf.addPage([pageW, pageH]);
-          for (let r = 0; r < rows; r++) {
-            for (let c = 0; c < cols; c++) {
-              if (currentPairIdx < pairs.length) {
-                const pair = pairs[currentPairIdx];
-                stampElement(
-                  frontSheet,
-                  pair.front,
-                  startX + c * (cutW + gutter) - offset,
-                  startY + r * (cutH + gutter) - offset,
-                  drawW,
-                  drawH,
-                );
-                if (pair.back) {
-                  const mirroredC = cols - 1 - c;
-                  stampElement(
-                    backSheet,
-                    pair.back,
-                    startX + mirroredC * (cutW + gutter) - offset,
-                    startY + r * (cutH + gutter) - offset,
-                    drawW,
-                    drawH,
-                  );
-                }
-                currentPairIdx++;
-              }
-            }
-          }
-          drawCropMarksAndSlug(frontSheet);
-          drawCropMarksAndSlug(backSheet);
-        }
-      } else {
-        let currentPageIdx = 0;
-        let sheetCount = 0;
-        const totalEstimatedSheets = Math.ceil(allElements.length / totalSlots);
-        while (currentPageIdx < allElements.length) {
-          sheetCount++;
-          reportProgress(sheetCount, totalEstimatedSheets, "Sheets");
-          const page = newPdf.addPage([pageW, pageH]);
-          for (let r = 0; r < rows; r++) {
-            for (let c = 0; c < cols; c++) {
-              if (currentPageIdx < allElements.length) {
-                stampElement(
-                  page,
-                  allElements[currentPageIdx],
-                  startX + c * (cutW + gutter) - offset,
-                  startY + r * (cutH + gutter) - offset,
-                  drawW,
-                  drawH,
-                );
-                currentPageIdx++;
-              }
-            }
-          }
-          drawCropMarksAndSlug(page);
-        }
+        const fx = baseX - offset,
+          fy = baseY - offset;
+        const bx = fx + backDX,
+          by = fy + backDY;
+        stampElement(frontSheet, allElements[totalPages - 1 - s * 2], fx, fy, 0);
+        stampElement(frontSheet, allElements[s * 2], fx + cutW, fy, 0);
+        stampElement(backSheet, allElements[s * 2 + 1], bx, by, 0);
+        stampElement(backSheet, allElements[totalPages - 2 - s * 2], bx + cutW, by, 0);
+        drawCropMarksAndSlug(frontSheet, false, s + 1, sheets);
+        drawCropMarksAndSlug(backSheet, true, s + 1, sheets);
       }
     } else {
-      let sheetCount = 0;
-      for (const element of allElements) {
-        sheetCount++;
-        reportProgress(sheetCount, allElements.length, "Cloned Sheets");
-        const page = newPdf.addPage([pageW, pageH]);
+      const duplex = params.isDuplexMode;
+      const units = [];
+      if (duplex) {
+        for (let i = 0; i < allElements.length; i += 2)
+          units.push({ front: allElements[i], back: allElements[i + 1] || null });
+      } else {
+        for (const el of allElements) units.push({ front: el, back: null });
+      }
+
+      const slots = cols * rows;
+      let sheets, pick;
+      if (type === "cutstack") {
+        // Column-major through the stack: each slot position holds a
+        // consecutive run so the cut stacks come out in order.
+        sheets = Math.ceil(units.length / slots);
+        pick = (s, slot) => slot * sheets + s;
+      } else if (params.isNestingMode) {
+        sheets = Math.ceil(units.length / slots);
+        pick = (s, slot) => s * slots + slot;
+      } else {
+        sheets = units.length;
+        pick = (s) => s;
+      }
+      physicalSheets = sheets;
+
+      const frontRot = rotated ? 90 : 0;
+      // Turning the sheet over left↔right mirrors the rotation; tumbling
+      // (top↔bottom) adds a half turn on top of that.
+      const backRot = ((tumble ? 540 : 360) - frontRot) % 360;
+
+      for (let s = 0; s < sheets; s++) {
+        reportProgress(s + 1, sheets);
+        const front = newPdf.addPage([pageW, pageH]);
+        const back = duplex ? newPdf.addPage([pageW, pageH]) : null;
         for (let r = 0; r < rows; r++) {
           for (let c = 0; c < cols; c++) {
+            const idx = pick(s, r * cols + c);
+            if (idx >= units.length) continue;
+            const u = units[idx];
             stampElement(
-              page,
-              element,
-              startX + c * (cutW + gutter) - offset,
-              startY + r * (cutH + gutter) - offset,
-              drawW,
-              drawH,
+              front,
+              u.front,
+              baseX + c * (cutW + gutter) - offset,
+              baseY + r * (cutH + gutter) - offset,
+              frontRot,
             );
+            if (back && u.back) {
+              const bc = tumble ? c : cols - 1 - c;
+              const br = tumble ? rows - 1 - r : r;
+              stampElement(
+                back,
+                u.back,
+                baseX + backDX + bc * (cutW + gutter) - offset,
+                baseY + backDY + br * (cutH + gutter) - offset,
+                backRot,
+              );
+            }
           }
         }
-        drawCropMarksAndSlug(page);
+        drawCropMarksAndSlug(front, false, s + 1, sheets);
+        if (back) drawCropMarksAndSlug(back, true, s + 1, sheets);
       }
     }
 
-    // --- PHASE 4: ENCODE EXPORT STREAM ---
+    // Area of the finished items vs. the whole sheet.
+    const perSheet = type === "booklet" ? 2 : cols * rows;
+    const usedArea = perSheet * cutWMm * cutHMm;
     self.postMessage({
-      type: "progress",
-      title: "Compiling Byte Stream...",
-      detail: "Optimizing object coordinate tables",
-      percent: 95,
+      type: "layout",
+      cols,
+      rows,
+      perSheet,
+      sheets: physicalSheets,
+      sheetW: useLandscape ? sheetLongMm : sheetShortMm,
+      sheetH: useLandscape ? sheetShortMm : sheetLongMm,
+      rotated,
+      usage: Math.round((usedArea / (sheetLongMm * sheetShortMm)) * 100),
+      bleed: outerBleed,
     });
+
+    // --- PHASE 4: ENCODE EXPORT STREAM ---
+    progress(M.saving, M.savingDetail, 95);
     const pdfBytes = await newPdf.save();
 
-    const baseName =
-      files.length > 1
-        ? "GangRun_Batch"
-        : files[0].name.replace(/\.[^/.]+$/, "");
-    let exportPrintName = type.toUpperCase();
     const suffixLabel = hasBleed ? "bleed" : "exact";
     const modeLabel = params.isNestingMode ? "Nested" : "Cloned";
     const plexLabel = params.isDuplexMode ? "Duplex" : "Simplex";
+    const rotLabel = rotated ? "_Rot90" : "";
 
-    let newFileName = `${baseName}_${params.sheetSelection}_${exportPrintName}_${cols}x${rows}_${modeLabel}_${plexLabel}_${suffixLabel}.pdf`;
+    let newFileName = `${baseName}_${sheetLabel}_${type.toUpperCase()}_${cols}x${rows}${rotLabel}_${modeLabel}_${plexLabel}_${suffixLabel}.pdf`;
     if (type === "booklet")
-      newFileName = `${baseName}_${params.sheetSelection}_Booklet_Spreads_${suffixLabel}.pdf`;
+      newFileName = `${baseName}_${sheetLabel}_Booklet_Spreads_${suffixLabel}.pdf`;
 
-    self.postMessage({ type: "success", pdfBytes, fileName: newFileName });
+    self.postMessage({ type: "success", pdfBytes, fileName: newFileName }, [
+      pdfBytes.buffer,
+    ]);
   } catch (error) {
     self.postMessage({ type: "error", message: error.message });
   }
