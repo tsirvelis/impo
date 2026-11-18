@@ -1,4 +1,4 @@
-importScripts("https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js");
+importScripts("https://unpkg.com/pdf-lib/dist/pdf-lib.min.js");
 
 function mmToPt(mm) {
   return (mm * 72) / 25.4;
@@ -7,9 +7,7 @@ function ptToMm(pt) {
   return (pt * 25.4) / 72;
 }
 
-// Converts the colour picker value to CMYK. Neutral greys/black map to pure K
-// so small text prints from a single plate (no 4-colour misregistration).
-function hexToCmyk(hex) {
+function hexToRgb(hex) {
   hex = hex.replace(/^#/, "");
   if (hex.length === 3)
     hex = hex
@@ -19,101 +17,7 @@ function hexToCmyk(hex) {
   const r = parseInt(hex.slice(0, 2), 16) / 255;
   const g = parseInt(hex.slice(2, 4), 16) / 255;
   const b = parseInt(hex.slice(4, 6), 16) / 255;
-  const k = 1 - Math.max(r, g, b);
-  if (k >= 1 || (r === g && g === b)) return PDFLib.cmyk(0, 0, 0, k);
-  return PDFLib.cmyk(
-    (1 - r - k) / (1 - k),
-    (1 - g - k) / (1 - k),
-    (1 - b - k) / (1 - k),
-    k,
-  );
-}
-
-// Registration colour: crop marks appear on every separation.
-const REGISTRATION = PDFLib.cmyk(1, 1, 1, 1);
-const PURE_K = PDFLib.cmyk(0, 0, 0, 1);
-
-// Reads pixel density from JPEG (JFIF APP0 / EXIF) or PNG (pHYs) headers.
-// Returns { x, y } in dots per inch, or null if the file doesn't say.
-function readImageDpi(buffer, mime) {
-  const d = new DataView(buffer);
-  try {
-    if (mime === "image/png") {
-      let off = 8;
-      while (off + 8 <= d.byteLength) {
-        const len = d.getUint32(off);
-        const type = String.fromCharCode(
-          d.getUint8(off + 4),
-          d.getUint8(off + 5),
-          d.getUint8(off + 6),
-          d.getUint8(off + 7),
-        );
-        if (type === "pHYs" && d.getUint8(off + 16) === 1) {
-          return {
-            x: d.getUint32(off + 8) * 0.0254,
-            y: d.getUint32(off + 12) * 0.0254,
-          };
-        }
-        if (type === "IDAT" || type === "IEND") break;
-        off += 12 + len;
-      }
-      return null;
-    }
-
-    // JPEG: walk the markers before the image data.
-    let off = 2;
-    let jfif = null;
-    while (off + 4 <= d.byteLength && d.getUint8(off) === 0xff) {
-      const marker = d.getUint8(off + 1);
-      const len = d.getUint16(off + 2);
-      const seg = off + 4;
-      if (marker === 0xe1 && d.getUint32(seg) === 0x45786966) {
-        const exif = readExifDpi(d, seg + 6);
-        if (exif) return exif;
-      } else if (marker === 0xe0 && d.getUint32(seg) === 0x4a464946) {
-        const units = d.getUint8(seg + 7);
-        const x = d.getUint16(seg + 8);
-        const y = d.getUint16(seg + 10);
-        if (x > 1 && y > 1) {
-          if (units === 1) jfif = { x, y };
-          else if (units === 2) jfif = { x: x * 2.54, y: y * 2.54 };
-        }
-      }
-      if (marker === 0xda) break;
-      off += 2 + len;
-    }
-    return jfif;
-  } catch (_) {
-    return null;
-  }
-}
-
-function readExifDpi(d, tiff) {
-  const le = d.getUint16(tiff) === 0x4949;
-  const u16 = (o) => d.getUint16(o, le);
-  const u32 = (o) => d.getUint32(o, le);
-  const ifd = tiff + u32(tiff + 4);
-  const count = u16(ifd);
-  let x = null,
-    y = null,
-    unit = 2;
-  for (let i = 0; i < count; i++) {
-    const ent = ifd + 2 + i * 12;
-    const tag = u16(ent);
-    if (tag === 0x011a || tag === 0x011b) {
-      const at = tiff + u32(ent + 8);
-      const den = u32(at + 4);
-      const val = den ? u32(at) / den : 0;
-      if (tag === 0x011a) x = val;
-      else y = val;
-    } else if (tag === 0x0128) {
-      unit = u16(ent + 8);
-    }
-  }
-  if (!(x > 1 && y > 1)) return null;
-  if (unit === 3) return { x: x * 2.54, y: y * 2.54 };
-  if (unit === 2) return { x, y };
-  return null;
+  return PDFLib.rgb(r, g, b);
 }
 
 const SHEET_DIMENSIONS = {
@@ -138,7 +42,7 @@ self.onmessage = async (e) => {
       targetFontEnum = PDFLib.StandardFonts.CourierBold;
     const vdpFont = await newPdf.embedFont(targetFontEnum);
 
-    const vdpColor = hexToCmyk(params.vdpFontColor || "#000000");
+    const vdpColor = hexToRgb(params.vdpFontColor || "#000000");
     const slugFont = await newPdf.embedFont(PDFLib.StandardFonts.Helvetica);
 
     const stampElement = (targetPage, element, xPos, yPos, w, h) => {
@@ -203,8 +107,6 @@ self.onmessage = async (e) => {
       originalHMm = 0;
     let type = "auto";
     let hasBleed = true;
-    // Bleed used for layout: the slider value, or the bleed found in the PDF boxes.
-    let bleedMm = params.userBleed;
 
     if (params.profileSelection.startsWith("bc")) type = "bc";
     if (params.profileSelection.startsWith("cutstack")) type = "cutstack";
@@ -226,26 +128,15 @@ self.onmessage = async (e) => {
 
       if (file.type === "application/pdf") {
         const originalPdf = await PDFLib.PDFDocument.load(file.buffer);
-        const srcPages = originalPdf.getPages();
-        // pdf-lib falls back TrimBox/BleedBox -> CropBox -> MediaBox.
-        const trimBox = srcPages[0].getTrimBox();
-        const bleedBox = srcPages[0].getBleedBox();
+        const firstPage = originalPdf.getPages()[0];
+        const mediaBox = firstPage.getMediaBox();
+        const trimBox = firstPage.getTrimBox() || mediaBox;
+        const bleedBox = firstPage.getBleedBox() || mediaBox;
 
         const trimWMm = Math.round(ptToMm(trimBox.width) * 10) / 10;
         const trimHMm = Math.round(ptToMm(trimBox.height) * 10) / 10;
-
-        // Smallest bleed on any of the four sides, rounded DOWN to 0.5 mm so
-        // the crop window never reaches past the artwork's real bleed.
-        const sideBleedPt = Math.min(
-          trimBox.x - bleedBox.x,
-          trimBox.y - bleedBox.y,
-          bleedBox.x + bleedBox.width - (trimBox.x + trimBox.width),
-          bleedBox.y + bleedBox.height - (trimBox.y + trimBox.height),
-        );
-        const detectedBleedMargin = Math.max(
-          0,
-          Math.floor((ptToMm(sideBleedPt) + 0.05) * 2) / 2,
-        );
+        const bleedWMm = Math.round(ptToMm(bleedBox.width) * 10) / 10;
+        const detectedBleedMargin = Math.round((bleedWMm - trimWMm) / 2);
 
         if (i === 0) {
           self.postMessage({
@@ -254,35 +145,20 @@ self.onmessage = async (e) => {
             trimH: trimHMm,
             bleedMargin: detectedBleedMargin,
           });
-          if (hasBleed && detectedBleedMargin > 0) bleedMm = detectedBleedMargin;
         }
 
-        // "exact" profiles cut on the trim line, so drop any bleed; otherwise
-        // keep exactly trim + detected bleed. Anything outside (printer marks,
-        // slug, oversized MediaBox) is clipped away instead of being scaled in.
-        const keepMm = hasBleed ? detectedBleedMargin : 0;
-        const keepPt = mmToPt(keepMm);
-        currentWMm = trimWMm + keepMm * 2;
-        currentHMm = trimHMm + keepMm * 2;
-        const boxes = srcPages.map((p) => {
-          const t = p.getTrimBox();
-          return {
-            left: t.x - keepPt,
-            bottom: t.y - keepPt,
-            right: t.x + t.width + keepPt,
-            top: t.y + t.height + keepPt,
-          };
-        });
-        const embeddedPages = await newPdf.embedPages(srcPages, boxes);
+        currentWMm = trimWMm + detectedBleedMargin * 2;
+        currentHMm = trimHMm + detectedBleedMargin * 2;
+        const pageIndices = originalPdf.getPageIndices();
+        const embeddedPages = await newPdf.embedPdf(originalPdf, pageIndices);
         extractedItems = embeddedPages.map((p) => ({ type: "page", obj: p }));
       } else {
-        const dpi = readImageDpi(file.buffer, file.type) || { x: 300, y: 300 };
         let img;
         if (file.type === "image/jpeg")
           img = await newPdf.embedJpg(file.buffer);
         else img = await newPdf.embedPng(file.buffer);
-        currentWMm = Math.round((img.width / dpi.x) * 25.4 * 10) / 10;
-        currentHMm = Math.round((img.height / dpi.y) * 25.4 * 10) / 10;
+        currentWMm = Math.round((img.width / 300) * 25.4 * 10) / 10;
+        currentHMm = Math.round((img.height / 300) * 25.4 * 10) / 10;
         extractedItems = [{ type: "image", obj: img }];
       }
 
@@ -291,11 +167,11 @@ self.onmessage = async (e) => {
         originalHMm = currentHMm;
         if (params.forceScale) {
           if (type === "bc") {
-            artWMm = hasBleed ? 90 + bleedMm * 2 : 90;
-            artHMm = hasBleed ? 50 + bleedMm * 2 : 50;
+            artWMm = hasBleed ? 90 + params.userBleed * 2 : 90;
+            artHMm = hasBleed ? 50 + params.userBleed * 2 : 50;
           } else {
             const addedBleed =
-              !params.scaleIncludesBleed && hasBleed ? bleedMm * 2 : 0;
+              !params.scaleIncludesBleed && hasBleed ? params.userBleed * 2 : 0;
             artWMm = params.targetW + addedBleed;
             artHMm = params.targetH + addedBleed;
           }
@@ -303,8 +179,8 @@ self.onmessage = async (e) => {
           artWMm = currentWMm;
           artHMm = currentHMm;
           if (type === "bc") {
-            const expectedW = hasBleed ? 90 + bleedMm * 2 : 90;
-            const expectedH = hasBleed ? 50 + bleedMm * 2 : 50;
+            const expectedW = hasBleed ? 90 + params.userBleed * 2 : 90;
+            const expectedH = hasBleed ? 50 + params.userBleed * 2 : 50;
             if (
               Math.abs(artWMm - expectedW) > 1.5 ||
               Math.abs(artHMm - expectedH) > 1.5
@@ -368,8 +244,8 @@ self.onmessage = async (e) => {
     const sheetLongMm = SHEET_DIMENSIONS[params.sheetSelection].long;
     const sheetShortMm = SHEET_DIMENSIONS[params.sheetSelection].short;
     let gutterMm = hasBleed ? params.userGutter : 0;
-    const cutWMm = hasBleed ? artWMm - bleedMm * 2 : artWMm;
-    const cutHMm = hasBleed ? artHMm - bleedMm * 2 : artHMm;
+    const cutWMm = hasBleed ? artWMm - params.userBleed * 2 : artWMm;
+    const cutHMm = hasBleed ? artHMm - params.userBleed * 2 : artHMm;
 
     const reserveMargin = (params.userCropLen + params.userCropGap + 2) * 2;
     const maxUsableLong = sheetLongMm - reserveMargin;
@@ -427,7 +303,7 @@ self.onmessage = async (e) => {
     const gutter = mmToPt(gutterMm);
     const drawW = mmToPt(artWMm);
     const drawH = mmToPt(artHMm);
-    const offset = hasBleed ? mmToPt(bleedMm) : 0;
+    const offset = hasBleed ? mmToPt(params.userBleed) : 0;
 
     const gridTotalW = cols * cutW + (cols - 1) * gutter;
     const gridTotalH = rows * cutH + (rows - 1) * gutter;
@@ -436,7 +312,7 @@ self.onmessage = async (e) => {
 
     const cropGap = mmToPt(params.userCropGap);
     const cropLen = mmToPt(params.userCropLen);
-    const markColor = REGISTRATION;
+    const markColor = PDFLib.rgb(0, 0, 0);
     const markThickness = 0.5;
 
     // UPGRADED STAMP LAYOUT HANDLER
@@ -539,7 +415,7 @@ self.onmessage = async (e) => {
           y: startY + gridTotalH + cropGap + 1,
           size: 4,
           font: slugFont,
-          color: PURE_K,
+          color: markColor,
         });
       }
     };
